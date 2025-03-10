@@ -1,0 +1,57 @@
+services:
+  mysql:
+    image: mysql
+    container_name: mysql-container
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./dump:/docker-entrypoint-initdb.d
+    ports:
+      - "3306:3306"
+    networks:
+      - backend
+
+  server:
+    build: ./server
+    container_name: backend-server
+    environment:
+      MYSQL_HOST: ${MYSQL_HOST}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      ISLOCAL: ${ISLOCAL}
+      EMAIL_PSWD: ${EMAIL_PSWD}
+      TENANT_ID: ${TENANT_ID}
+      CLIENT_ID: ${CLIENT_ID}
+      CLIENT_SECRET: ${CLIENT_SECRET}
+      PURDUE_EMAIL: ${PURDUE_EMAIL}
+      GDRIVE_KEY_PATH: ${GDRIVE_KEY_PATH}
+      GDRIVE_FOLDER_ID: ${GDRIVE_FOLDER_ID}
+    depends_on:
+      - mysql
+    ports:
+      - "3001:3001"
+    networks:
+      - backend
+
+  client:
+    build: ./client
+    container_name: client
+    environment:
+      REACT_APP_ISLOCAL: ${REACT_APP_ISLOCAL}
+      REACT_APP_ADMIN_PSWD: ${REACT_APP_ADMIN_PSWD}
+    depends_on:
+      - server
+    ports:
+      - "80:80"
+    networks:
+      - backend
+
+networks:
+  backend:
+    driver: bridge
+
+volumes:
+  mysql-data:

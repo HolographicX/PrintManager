@@ -60,10 +60,10 @@ async function getGraphClient() {
 
 
 const pool = isLocal ? mysql.createPool({ // for local development
-    host: "localhost",
-    user: "root",
-    password: "rootpassword",
-    database: "printmanagerdb2"
+    host: process.env.MYSQL_HOST,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE
 }) :
     mysql.createPool({ // for the 3DPC lab
         host: "localhost",
