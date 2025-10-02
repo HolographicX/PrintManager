@@ -130,7 +130,7 @@ Coming soon!
 ![pm_9](https://github.com/user-attachments/assets/a3b81743-a95c-4fb5-a9b1-e78f8f37574b)
 
 # Docker instructions
-Go to the root directory and run:
+Make sure you have Docker and Docker Compose installed. Go to the root directory and run:
 ```
 docker compose up -d
 ```
