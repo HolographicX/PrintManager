@@ -1,0 +1,22 @@
+{
+  "files": {
+    "main.css": "/static/css/main.7d842c57.css",
+    "main.js": "/static/js/main.7eb20f6e.js",
+    "static/media/dudley_overlay.png": "/static/media/dudley_overlay.1423aee1e78264952b19.png",
+    "static/media/favicon.ico": "/static/media/favicon.dafcfc3f387eb2e71780.ico",
+    "static/media/x.png": "/static/media/x.8ff17584ab4935a68d1d.png",
+    "static/media/3dpc_discord.png": "/static/media/3dpc_discord.60490790d9799f3c382b.png",
+    "static/media/loading.gif": "/static/media/loading.3df7cd8949ede9dbdc2c.gif",
+    "static/media/form_icon.png": "/static/media/form_icon.9fae88c229a61adbba5f.png",
+    "index.html": "/index.html",
+    "static/media/eye_slash.svg": "/static/media/eye_slash.6149def3e3d4f9b9b17c846ed5e1f91f.svg",
+    "static/media/eye.svg": "/static/media/eye.653da2c441f9162e112733ac3fbaba72.svg",
+    "static/media/exit.svg": "/static/media/exit.7521d0028db443854376c6b783809868.svg",
+    "main.7d842c57.css.map": "/static/css/main.7d842c57.css.map",
+    "main.7eb20f6e.js.map": "/static/js/main.7eb20f6e.js.map"
+  },
+  "entrypoints": [
+    "static/css/main.7d842c57.css",
+    "static/js/main.7eb20f6e.js"
+  ]
+}
