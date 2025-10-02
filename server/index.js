@@ -12,15 +12,6 @@ require('isomorphic-fetch');
 const fetch = require('node-fetch');
 const axios = require('axios');
 
-const pool = mysql.createPool({
-    host: "localhost",
-    user: "root",
-    password: "rootpassword",
-    database: "printmanagerdb2",
-    timezone: '-04:00',
-    dateStrings: true
-})
-
 // printables filtering
 const {blacklist, whitelist} = require('./scraperFilter.json');
 function buildWordRegex(words) {
@@ -96,6 +87,19 @@ async function getGraphClient() {
     });
 }
 
+
+const pool = isLocal ? mysql.createPool({ // for local development
+    host: process.env.MYSQL_HOST,
+    user: process.env.MYSQL_USER,
+    password: process.env.MYSQL_PASSWORD,
+    database: process.env.MYSQL_DATABASE
+}) :
+    mysql.createPool({ // for the 3DPC lab
+        host: "localhost",
+        user: "root",
+        password: "supervisor",
+        database: "printmanagerdb2"
+    })
 
 app.use(cors());
 app.use(express.json());
