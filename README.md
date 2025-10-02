@@ -131,9 +131,9 @@ Coming soon!
 
 # Docker instructions
 Go to the root directory and run:
-``
+```
 docker compose up -d
-``
+```
 This will create mysql, server, and client containers. It will run client on `localhost:80`.
 
 
