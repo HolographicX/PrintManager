@@ -128,3 +128,73 @@ Coming soon!
 2. Next, in the table that appears, you can directly modify the values by clicking a cell and typing a new value. You can also delete a row by clicking the farthest left column and pressing delete.
 3. When you are done making changes, click apply in the bottom right corner.
 ![pm_9](https://github.com/user-attachments/assets/a3b81743-a95c-4fb5-a9b1-e78f8f37574b)
+
+# Docker instructions
+Make sure you have Docker and Docker Compose installed. Go to the root directory and run:
+```
+docker compose up -d
+```
+This will create mysql, server, and client containers. It will run client on `localhost:80`.
+
+
+# Directory Structure
+Ensure you have the following directory structure.
+```
+├── client
+│   ├── public
+│   │   ├── favicon.ico
+│   │   ├── index.html
+│   │   ├── manifest.json
+│   │   └── robots.txt
+│   ├── src
+│   │   ├── images
+│   │   │   ├── 3dpc_discord.png
+│   │   │   ├── dudley_overlay.png
+│   │   │   ├── exit.svg
+│   │   │   ├── eye.svg
+│   │   │   ├── eye_slash.svg
+│   │   │   ├── favicon.ico
+│   │   │   ├── form_icon.png
+│   │   │   ├── loading.gif
+│   │   │   ├── settings.png
+│   │   │   ├── sheets_icon.png
+│   │   │   └── x.png
+│   │   ├── App.css
+│   │   ├── App.js
+│   │   ├── ErrorBoundary.js
+│   │   ├── LineChart.css
+│   │   ├── LineChart.js
+│   │   ├── PrintForm.js
+│   │   ├── Settings.css
+│   │   ├── Settings.js
+│   │   ├── Sidebar.css
+│   │   ├── Sidebar.js
+│   │   ├── StlPreview.js
+│   │   └── index.js
+│   ├── Dockerfile
+│   ├── babel.config.js
+│   ├── favicon.ico
+│   ├── package-lock.json
+│   └── package.json
+├── data
+│   ├── aria_log.00000001
+│   ├── aria_log_control
+│   ├── ib_buffer_pool
+│   ├── ib_logfile0
+│   └── ibdata1
+├── dump
+│   ├── printmanagerdb2_printer.sql
+│   ├── printmanagerdb2_printjob.sql
+│   └── printmanagerdb2_routines.sql
+├── server
+│   ├── gdrive_uploads
+│   ├── keys
+│   │   └── dpc-organizer-7e241c511cf8.json
+│   ├── Dockerfile
+│   ├── index.js
+│   ├── package-lock.json
+│   └── package.json
+├── README.md
+└── docker-compose.yaml
+```
+
