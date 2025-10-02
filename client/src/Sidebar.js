@@ -1,10 +1,10 @@
 import React from 'react';
 import './Sidebar.css';
 
-import clubIcon from './images/favicon.ico'
-import settingsIcon from './images/settings.png'
-import sheetsIcon from './images/sheets_icon.png'
-import formIcon from './images/form_icon.png'
+import clubIcon from '/images/favicon.ico'
+import settingsIcon from '/images/settings.png'
+import sheetsIcon from '/images/sheets_icon.png'
+import formIcon from '/images/form_icon.png'
 
 
 const Sidebar = ({ printerList, handlePrinterClick, selectedPrinter, handleOpenMenu, menuOpen, selectPrinter, width,
@@ -23,8 +23,8 @@ const Sidebar = ({ printerList, handlePrinterClick, selectedPrinter, handleOpenM
                 <div className="icons-wrapper">
                     <div className='settings-icon-wrapper' style={menuOpen ? { outline: "4px solid black" } : {}}><img id="settingsIcon" src={settingsIcon} alt="Settings Icon" title="Open Settings" onClick={() => handleOpenMenu()}></img></div>
                     <a target="_blank" rel="noreferrer" href="https://www.purdue3dpc.org/index.html"><img className='resizeIcon' src={clubIcon} alt="3DPC Icon" title="To 3DPC Website"></img></a>
-                    <a target="_blank" rel="noreferrer" href="https://docs.google.com/forms/d/e/1FAIpQLSekPQ-72b4-4OKPI0zdP8tBX7GILtJMqNX0QoxtZ_NnxpSNsQ/viewform"><img className="resizeIcon" src={formIcon} alt="Google forms Icon" title="To Job Form"></img></a>
-                    <a target="_blank" rel="noreferrer" href="https://docs.google.com/spreadsheets/d/1qqYqVSz2mWbBKAXCtJFE8krPFTx8mSw6u1mR7jS0O7I/edit?gid=466331251#gid=466331251"><img className="resizeIcon" src={sheetsIcon} alt="Google sheets Icon" title="To Job Form Submissions"></img></a>
+                    <a target="_blank" rel="noreferrer" href="https://docs.google.com/forms/d/e/1FAIpQLScotuFISiZDdJUDmf3OXDgBOY-JSJZNFooZAfX8penUztZmwQ/viewform?usp=dialog"><img className="resizeIcon" src={formIcon} alt="Google forms Icon" title="To Job Form"></img></a>
+                    <a target="_blank" rel="noreferrer" href="https://docs.google.com/spreadsheets/d/1Ax9InwNzogcTwsVTjPCf2UJDALKkSiXkRTjorxXr2RI/edit?gid=1308411944#gid=1308411944"><img className="resizeIcon" src={sheetsIcon} alt="Google sheets Icon" title="To Job Form Submissions"></img></a>
                     {/* old form link: https://docs.google.com/spreadsheets/d/1MmkZDc7zRuepVEo2r84ithNJ6Q01GhMqSWrNzZSzRpQ/edit?gid=701945760#gid=701945760 */}
                 </div>
 
@@ -50,7 +50,7 @@ const Sidebar = ({ printerList, handlePrinterClick, selectedPrinter, handleOpenM
             <div id='lowerBar'>
                 <div className={'sidePrinter'}
                     onClick={() => handlePrinterClick(null)}
-                    style={{ backgroundColor: 'rgb(118, 152, 255)' }}> Home </div>
+                    style={{ backgroundColor: 'rgb(133, 169, 255)' }}> Home </div>
                 {printerList.map((printer, index) => {
                     return <div className={`sidePrinter ${(selectedPrinter && (selectedPrinter.printerName === printer.printerName)) ? 'selected' : ''}`}
                         key={index}

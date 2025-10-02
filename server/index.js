@@ -5,16 +5,26 @@ const app = express();
 const bodyParser = require('body-parser');
 const cors = require('cors');
 const mysql = require('mysql2');
-const isLocal = process.env.ISLOCAL == 'true';
 const { ClientSecretCredential } = require('@azure/identity');
 const credential = new ClientSecretCredential(process.env.TENANT_ID, process.env.CLIENT_ID, process.env.CLIENT_SECRET);
-
 const { Client } = require('@microsoft/microsoft-graph-client');
 require('isomorphic-fetch');
 const fetch = require('node-fetch');
-const path = require('path');
+const axios = require('axios');
 
-//google drive / file system
+// printables filtering
+const {blacklist, whitelist} = require('./scraperFilter.json');
+function buildWordRegex(words) {
+  words = words.concat(words.map(w => w+'s'));
+  const escaped = words.map(w => w.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+  return new RegExp(`(?:^|[^a-zA-Z0-9])(${escaped.join("|")})(?=$|[^a-zA-Z0-9])`, "i");
+}
+
+const blacklistRegex = buildWordRegex(blacklist);
+const whitelistRegex = buildWordRegex(whitelist);
+
+
+// google drive / file system
 const fs = require('fs-extra');
 const { google } = require('googleapis');
 
@@ -31,6 +41,25 @@ const puppeteer = require('puppeteer-extra');
 const StealthPlugin = require('puppeteer-extra-plugin-stealth');
 const { randomInt } = require('crypto');
 puppeteer.use(StealthPlugin());
+
+const tempCutoffTime = '2025-08-15'
+
+// json file management
+const path = require('path');
+const { type } = require('os');
+const localDataPath = path.join(__dirname, 'localData.json')
+
+function loadLocalData() {
+    try {
+        return (JSON.parse(fs.readFileSync(localDataPath, 'utf-8')));
+    } catch (e) {
+        return {}
+    }
+}
+
+function saveLocalData(localData) {
+    fs.writeFileSync(localDataPath, JSON.stringify(localData, null, 2), 'utf-8');
+}
 
 
 function createGdriveAuth(keyPath) {
@@ -76,37 +105,25 @@ app.use(cors());
 app.use(express.json());
 app.use(bodyParser.urlencoded({ extended: true }));
 
+// get the localData
+app.get('/api/getLocalData', (req, res) => {
+    res.send(loadLocalData());
+});
 
 
-// Endpoint to get the STL file name using the google drive API
-// app.get('/api/getFilename', async (req, res) => {
-//     try{
+// set the localData
+app.post('/api/setLocalData', (req, res) => {
+    let b = req.body;
+    try {
+        saveLocalData(b.localData)
+        res.send({ success: true, msg: 'localData update successful' });
+    } catch (e) {
+        res.send({ success: false, msg: 'error updating local data: ' + e.toString() })
+    }
+});
 
-//     const { link } = req.query;
-//     if (!link) {
-//         return res.status(400).send('Missing url parameter');
-//     }
-
-//     const fileId = getFileID(link);
-//     console.log('fileID:',fileId);
-//     const response = await drive.files.get({
-//         fileId,
-//         fields: 'name'
-//       });
-
-//       console.log('got filename:',response.data.name)
-//       res.send({filename:response.data.name});
-//     }catch(e){
-//         console.error('ERROR in getFilename:',e);
-//         return res.status(400).send('Error getting filename');
-//     }
-// });
-
-
-
-// Sends an email from purdue graph api when called
-app.post('/api/send-email', async (req, res) => {
-    const { to, subject, text } = req.body;
+async function sendEmail(paramsObj) {
+    const { to, subject, text } = paramsObj;
 
     const client = await getGraphClient();
 
@@ -123,10 +140,19 @@ app.post('/api/send-email', async (req, res) => {
             saveToSentItems: false
         });
 
-        res.send('Email sent successfully');
+        return { success: true, msg: 'Email sent successfully' }
     } catch (error) {
         console.error("Graph API Error:", error);
-        res.status(500).send(error.toString());
+        return { success: false, msg: error.toString() }
+    }
+}
+// Sends an email from purdue graph api when called
+app.post('/api/send-email', async (req, res) => {
+    let rslt = await sendEmail(req.body)
+    if (rslt.success) {
+        res.send(rslt)
+    } else {
+        res.status(500).send(rslt)
     }
 });
 
@@ -209,27 +235,18 @@ app.get('/api/stream-stl', async (req, res) => {
     }
 
     const directUrl = getDirectLink(url);
-    console.log('directUrl:', directUrl);
+    // console.log('directUrl:', directUrl);
     try {
         const response = await fetch(directUrl);
         if (!response.ok) {
             return res.status(500).send('Error fetching the STL file from Google Drive');
         }
 
-        // Option 1: Buffer the response, then send it:
         const buffer = await response.buffer();
 
         // Set the Content-Type header explicitly
         res.setHeader('Content-Type', response.headers.get('content-type') || 'application/octet-stream');
         res.send(buffer);
-
-        // Option 2: If the file is too large to buffer entirely,
-        // you may need to pipe the stream and ensure no conflicting headers are included.
-        // In that case, you might want to remove or override any headers from Google Drive's response.
-        // For example:
-        // res.setHeader('Content-Type', 'application/octet-stream');
-        // response.body.on('data', chunk => res.write(chunk));
-        // response.body.on('end', () => res.end());
 
     } catch (err) {
         console.error('Error:', err);
@@ -241,28 +258,41 @@ app.get('/api/stream-stl', async (req, res) => {
 async function getPrintLinks(browser) {
     const homePage = await browser.newPage();
 
-    console.log('\nscraper: going to printables..')
+    // console.log('\nscraper: going to printables..')
     await homePage.goto('https://www.printables.com/model', { waitUntil: 'domcontentloaded' });
 
-    console.log('waiting for card-images to load..')
+    // console.log('waiting for card-images to load..')
     // Wait for the popular items to load. Adjust the selector to one that exists on the page.
     await homePage.waitForSelector('[class*="card-image"]');
 
+    homePage.on('console', msg => {
+        console.log('PAGE LOG:', msg.text());
+    });
 
-    // Evaluate the page to extract information from the first popular STL file.
-    console.log('evaluating page')
+    // Evaluate the page to extract information from the cards
+    // console.log('evaluating page')
     const printLinks = await homePage.evaluate(() => {
+        const imgItems = document.querySelectorAll('[class*="image-inside"]');
+        imgLinks = Array.from(imgItems, pic => {
+            const img = pic.querySelector('img');
+            return img?.src || null;
+        });
+
         const items = document.querySelectorAll('[class*="h clamp-two-lines"]');
-        let tagList = Array.from(items).map(item => item.outerHTML);
 
-        return tagList.map(htmlString => {
-            const regexName = />([^<]+)</;
-            const matchName = htmlString.match(regexName);
+        const results = Array.from(items, (item, index) => {
+            const html = item.outerHTML;
+            const nameMatch = html.match(/>([^<]+)</);
+            const hrefMatch = html.match(/href="([^"]+)"/);
 
-            const regex = /href="([^"]+)"/;
-            const match = htmlString.match(regex);
-            return { 'link': match ? ("https://printables.com" + match[1] + "/files") : null, 'name': matchName[1] };
-        }).filter(id => id !== null);
+            return {
+                name: nameMatch ? nameMatch[1].trim() : null,
+                link: hrefMatch ? `https://printables.com${hrefMatch[1]}/files` : null,
+                imgLink: imgLinks[index] || null
+            };
+        });
+
+        return results.filter(entry => (entry.link !== null) && (entry.imgLink !== null));
     });
     return printLinks;
 }
@@ -272,248 +302,153 @@ async function getDownloadLinks(browser, printLinks) {
     let pageIndex = randomInt(0, printLinks.length);
     let cookieClicked = false;
 
-    // while (dlLinks.length === 0) {
-    try {
-        const printPage = await browser.newPage();
+    while (dlLinks.length === 0) {
+        try {
+            const printPage = await browser.newPage();
 
-        console.log(`\ngoing to print page ${pageIndex} -- ${printLinks[pageIndex].link}...`)
-        await printPage.goto(printLinks[pageIndex].link, { waitUntil: 'domcontentloaded' });
+            console.log(`\ngoing to print page ${pageIndex} -- ${printLinks[pageIndex].link}...`)
+            await printPage.goto(printLinks[pageIndex].link, { waitUntil: 'domcontentloaded' });
 
-        if (!cookieClicked) {
-            //click the accept cookies button so that it gets out of the way of the download buttons
-            console.log('\nwaiting for cookie btn...')
-            await printPage.waitForSelector('[id*="onetrust-accept-btn-handler"]', { timeout: 15000 });
-            await printPage.click('[id*="onetrust-accept-btn-handler"]');
-            await new Promise(resolve => setTimeout(resolve, 250));
-            console.log('clicked cookie btn...')
-            cookieClicked = true;
-        }
-
-
-        console.log('\nwaiting for download buttons...')
-        await printPage.waitForSelector('[class*="btn-download"]', { timeout: 15000 });
-        let dlBtns = await printPage.$$('[class*="btn-download"]')
-
-        console.log('buttons:', dlBtns.length);
-
-        console.log('\n\n Loading new page for each download button');
-        const promises = [];
-
-        // Assuming dlBtns is an array or iterable with buttons to click
-        for (let btnNum = 0; btnNum < dlBtns.length && btnNum < 6; btnNum++) {
-            promises.push((async (btnNum) => {
-                try {
-                    console.log('Opening page ', btnNum);
-
-                    // create a new browser for each download 
-                    // TODO: Make this more efficient!
-                    const browser = await puppeteer.launch({ headless: true });
-                    const printDLPage = await browser.newPage();
-
-                    // const printDLPage = await browser.newPage();
+            if (!cookieClicked) {
+                //click the accept cookies button so that it gets out of the way of the download buttons
+                console.log('\nwaiting for cookie btn...')
+                await printPage.waitForSelector('[id*="onetrust-accept-btn-handler"]', { timeout: 15000 });
+                await printPage.click('[id*="onetrust-accept-btn-handler"]');
+                await new Promise(resolve => setTimeout(resolve, 250));
+                console.log('clicked cookie btn...')
+                cookieClicked = true;
+            }
 
 
-                    // Listen for download requests on this page
-                    await printDLPage.setRequestInterception(true);
-                    printDLPage.on('request', request => {
-                        if (request.url().includes('files.printables.com') && request.url().includes('.stl')) {
-                            console.log('Intercepted download request:', request.url());
-                            dlLinks.push(request.url());
-                            request.abort(); // Abort the download request, we just want the link.
+            console.log('\nwaiting for download buttons...')
+            await printPage.waitForSelector('[class*="btn-download"]', { timeout: 15000 });
+            let dlBtns = await printPage.$$('[class*="btn-download"]')
+
+            console.log('buttons:', dlBtns.length);
+
+            console.log('\n\n Loading new page for each download button');
+            const promises = [];
+
+            // Assuming dlBtns is an array or iterable with buttons to click
+            for (let btnNum = 0; btnNum < dlBtns.length && btnNum < 6; btnNum++) {
+                promises.push((async (btnNum) => {
+                    let browser;
+                    try {
+                        console.log('Opening page ', btnNum);
+
+                        // create a new browser for each download 
+                        // TODO: Make this more efficient!
+                        browser = await puppeteer.launch({ headless: true, executablePath: process.env.CHROME_PATH });
+                        const printDLPage = await browser.newPage();
+
+
+
+                        // const printDLPage = await browser.newPage();
+
+
+                        // Listen for download requests on this page
+                        await printDLPage.setRequestInterception(true);
+                        printDLPage.on('request', request => {
+                            if (request.url().includes('files.printables.com')) console.log('Intercepted download request:', request.url());
+
+                            if (request.url().includes('files.printables.com') && request.url().includes('.stl')) {
+                                console.log('Intercepted download request:', request.url());
+                                dlLinks.push(request.url());
+                                request.abort(); // Abort the download request, we just want the link.
+                            } else {
+                                request.continue();
+                            }
+                        });
+
+                        console.log('Going to print download page...');
+                        await printDLPage.goto(printLinks[pageIndex].link, { waitUntil: 'domcontentloaded' });
+
+
+                        //click the accept cookies button so that it gets out of the way of the download buttons
+                        console.log('\nwaiting for cookie btn...')
+                        await printDLPage.waitForSelector('[id*="onetrust-accept-btn-handler"]', { timeout: 15000 });
+                        await printDLPage.click('[id*="onetrust-accept-btn-handler"]');
+                        await new Promise(resolve => setTimeout(resolve, 250));
+                        console.log('clicked cookie btn...')
+                        cookieClicked = true;
+
+
+                        console.log('Waiting for download buttons...');
+                        await printDLPage.waitForSelector('[class*="btn-download"]', { timeout: 15000 });
+                        const curDLBtns = await printDLPage.$$('[class*="btn-download"]');
+
+
+                        // Click the appropriate download button
+                        await curDLBtns[btnNum].click();
+
+                    } catch (error) {
+                        if (error.name === 'TimeoutError') {
+                            console.log('ERROR: Timeout occurred while getting handling print download button.');
                         } else {
-                            request.continue();
+                            throw error;
                         }
-                    });
-
-                    console.log('Going to print download page...');
-                    await printDLPage.goto(printLinks[pageIndex].link, { waitUntil: 'domcontentloaded' });
-
-
-                    //click the accept cookies button so that it gets out of the way of the download buttons
-                    console.log('\nwaiting for cookie btn...')
-                    await printDLPage.waitForSelector('[id*="onetrust-accept-btn-handler"]', { timeout: 15000 });
-                    await printDLPage.click('[id*="onetrust-accept-btn-handler"]');
-                    await new Promise(resolve => setTimeout(resolve, 250));
-                    console.log('clicked cookie btn...')
-                    cookieClicked = true;
-
-
-                    console.log('Waiting for download buttons...');
-                    await printDLPage.waitForSelector('[class*="btn-download"]', { timeout: 15000 });
-                    const curDLBtns = await printDLPage.$$('[class*="btn-download"]');
-
-
-                    // Click the appropriate download button
-                    await curDLBtns[btnNum].click();
-
-                } catch (error) {
-                    if (error.name === 'TimeoutError') {
-                        console.log('ERROR: Timeout occurred while getting handling print download button.');
-                    } else {
-                        throw error;
+                    } finally {
+                        await new Promise(resolve => setTimeout(resolve, 250));
+                        await browser.close()
                     }
-                }
-            })(btnNum));
+                })(btnNum));
+            }
+
+            // Execute all promises concurrently, wait for them all to finish here
+            await Promise.all(promises);
+
+
+            console.log('waiting for timeout...')
+            await new Promise(resolve => setTimeout(resolve, 1000));
+
+
+        } catch (error) {
+            if (error.name === 'TimeoutError') {
+                console.log('ERROR: Timeout occurred while getting download links.');
+            } else {
+                throw error;
+            }
         }
-
-        // Execute all promises concurrently, wait for them all to finish here
-        await Promise.all(promises);
-
-
-        console.log('waiting for timeout...')
-        await new Promise(resolve => setTimeout(resolve, 1000));
-
-
-    } catch (error) {
-        if (error.name === 'TimeoutError') {
-            console.log('ERROR: Timeout occurred while getting download links.');
-        } else {
-            throw error;
+        if (dlLinks.length === 0) {
+            console.log('incrementing page index...')
+            pageIndex++;
         }
     }
-    //     if (dlLinks.length === 0) {
-    //         console.log('incrementing page index...')
-    //         pageIndex++;
-    //     }
-    // }
     console.log('done');
     return ({ 'partLinks': dlLinks, 'pageLink': printLinks[pageIndex].link, 'pageName': printLinks[pageIndex].name });
 }
 
-// async function getDownloadLinks(browser, printLinks) {
-//     let dlLinks = []
-//     let pageIndex = 0;
-//     let cookieClicked = false;
+// determine if a string should be blocked or not using the whitelist and blacklist
+function isBlocked(text) {
+  const lower = text.toLowerCase();
+  // Check for blacklist matches
+  if (!lower.match(blacklistRegex)) return false;
 
-//     while (dlLinks.length === 0) {
-//         try {
-//             const printPage = await browser.newPage();
+  // Allow blacklisted words if there are also whitelisted words
+  if (lower.match(whitelistRegex)) {
+    return false;
+  }
 
-//             console.log(`\ngoing to print page ${pageIndex} -- ${printLinks[pageIndex].link}...`)
-//             await printPage.goto(printLinks[pageIndex].link, { waitUntil: 'domcontentloaded' });
-
-//             if (!cookieClicked) {
-//                 //click the accept cookies button so that it gets out of the way of the download buttons
-//                 console.log('\nwaiting for cookie btn...')
-//                 await printPage.waitForSelector('[id*="onetrust-accept-btn-handler"]', { timeout: 15000 });
-//                 await printPage.click('[id*="onetrust-accept-btn-handler"]');
-//                 await new Promise(resolve => setTimeout(resolve, 250));
-//                 console.log('clicked cookie btn...')
-//                 cookieClicked = true;
-//             }
-
-
-//             console.log('\nwaiting for download buttons...')
-//             await printPage.waitForSelector('[class*="btn-download"]', { timeout: 15000 });
-//             let dlBtns = await printPage.$$('[class*="btn-download"]')
-
-//             console.log('buttons:', dlBtns.length);
-
-//             console.log('\n\n Loading new page for each download button');
-//             const promises = [];
-
-//             // Assuming dlBtns is an array or iterable with buttons to click
-//             for (let btnNum = 0; btnNum < dlBtns.length && btnNum < 6; btnNum++) {
-//                 promises.push((async (btnNum) => {
-//                     try {
-//                         console.log('Opening page ', btnNum);
-
-//                         // create a new browser for each download
-//                         // const browser = await puppeteer.launch({ headless: true });
-//                         // const printDLPage = await browser.newPage();
-
-//                         const printDLPage = await browser.newPage();
-
-//                         // Listen for download requests on this page
-//                         await printDLPage.setRequestInterception(true);
-//                         printDLPage.on('request', request => {
-//                             if (request.url().includes('files.printables.com') && request.url().includes('.stl')) {
-//                                 console.log('Intercepted download request:', request.url());
-//                                 dlLinks.push(request.url());
-//                                 request.abort(); // Abort the download request, we just want the link.
-//                             } else {
-//                                 request.continue();
-//                             }
-//                         });
-
-//                         console.log('Going to print download page...');
-//                         await printDLPage.goto(printLinks[pageIndex].link, { waitUntil: 'domcontentloaded' });
-
-
-//                         //click the accept cookies button so that it gets out of the way of the download buttons
-//                         console.log('\nwaiting for cookie btn...')
-//                         // await printDLPage.waitForSelector('[id*="onetrust-accept-btn-handler"]', { timeout: 15000 });
-//                         // await printDLPage.click('[id*="onetrust-accept-btn-handler"]');
-//                         // await new Promise(resolve => setTimeout(resolve, 250));
-//                         console.log('clicked cookie btn...')
-//                         cookieClicked = true;
-
-
-//                         console.log('Waiting for download buttons...');
-//                         await printDLPage.waitForSelector('[class*="btn-download"]', { timeout: 15000 });
-//                         const curDLBtns = await printDLPage.$$('[class*="btn-download"]');
-//                         if (curDLBtns) {
-//                             console.log('clicking the dl button...')
-//                             // Click the appropriate download button
-//                             await curDLBtns[btnNum].click();
-//                         } else {
-//                             console.log('ERR: no dl buttons found on dl page')
-//                         }
-
-
-
-//                     } catch (error) {
-//                         if (error.name === 'TimeoutError') {
-//                             console.log('ERROR: Timeout occurred while getting handlig print download button.');
-//                         } else {
-//                             throw error;
-//                         }
-//                     }
-//                 })(btnNum));
-//             }
-
-//             // Execute all promises concurrently, wait for them all to finish here
-//             await Promise.all(promises);
-
-
-//             console.log('waiting for timeout...')
-//             await new Promise(resolve => setTimeout(resolve, 1000));
-
-
-//         } catch (error) {
-//             if (error.name === 'TimeoutError') {
-//                 console.log('ERROR: Timeout occurred while getting download links.');
-//             } else {
-//                 throw error;
-//             }
-//         }
-//         if (dlLinks.length === 0) {
-//             console.log('incrementing page index...')
-//             pageIndex++;
-//         }
-//     }
-//     console.log('done');
-//     return ({ 'partLinks': dlLinks, 'pageLink': printLinks[pageIndex].link, 'pageName': printLinks[pageIndex].name });
-// }
+//   console.log('blocked scraped print: ', text)
+  // Block strings that have blacklisted words only
+  return true;
+}
 
 app.get('/api/getDailyPrint', async (req, res) => {
     async function getDailyPrint() {
+        let browser;
         try {
-            const browser = await puppeteer.launch({ headless: true });
+            browser = await puppeteer.launch({ headless: true, executablePath: process.env.CHROME_PATH });
             const printLinks = await getPrintLinks(browser);
 
-            //printLinks = ['https://www.printables.com/model/1138664-lumo-headphone-stand/files']
-            console.log('got links: ', printLinks);
-
-            let linkObj = await getDownloadLinks(browser, printLinks);
-
-            await browser.close();
-
-            console.log('Part Links: ', linkObj.partLinks);
-            return linkObj;
+            // filter the scraped prints based on the blacklist and whitelist globals
+            return printLinks.filter(p=>!isBlocked(p.name));;
         } catch (e) {
             console.error('Error in getDailyPrint: ', e);
             return [];
+        } finally {
+            await new Promise(resolve => setTimeout(resolve, 250));
+            await browser.close();
         }
     }
     let retObj = await getDailyPrint();
@@ -521,9 +456,11 @@ app.get('/api/getDailyPrint', async (req, res) => {
 });
 
 app.get('/api/get', (req, res) => {
-
-    const sqlSelectPrinters = "SELECT * FROM printer";
-
+    const sqlSelectPrinters = req.query.query;//"SELECT * FROM printer";
+    if(!(sqlSelectPrinters && (typeof(sqlSelectPrinters) == 'string'))) { 
+        console.error('ERROR in /api/get: query is not present or not correct type (must be string)');
+        return;
+    }
     pool.getConnection((err, connection) => {
         if (err) {
             console.error('Error getting connection from pool:', err);
@@ -545,12 +482,13 @@ app.get('/api/get', (req, res) => {
                     connection.release();
                     return;
                 }
-                res.send({ printers: resultPrinters });
+                res.send({ result: resultPrinters });
                 connection.release();
             });
         });
     });
 });
+
 
 app.get('/api/getRecentFiles', (req, res) => {
     const sqlSelectRecentFiles = `SELECT files, partNames FROM printmanagerdb2.printjob WHERE files IS NOT NULL AND TRIM(files) <> '' ORDER BY timeStarted DESC LIMIT 5`;
@@ -832,12 +770,13 @@ app.get('/api/getdailyprints', (req, res) => {
 app.get('/api/getHistory', (req, res) => {
     const value = req.query.value;
     const field = req.query.field;
-    console.log('value:', value, '  field:', field)
+    // console.log('value:', value, '  field:', field)
 
-    let sqlSelectHistory = `SELECT * FROM printjob WHERE ${field} = ?`;
-    if (value === 'undefined') {
-        sqlSelectHistory = 'SELECT * FROM printjob';
+    let sqlSelectHistory = `SELECT * FROM printjob WHERE timeStarted > '${tempCutoffTime}'`;
+    if (value !== 'undefined') {
+        sqlSelectHistory += `AND ${field} = ?`
     }
+    sqlSelectHistory += ';'
     pool.getConnection((err, connection) => {
         if (err) {
             console.error('Error getting connection from pool:', err);
@@ -891,8 +830,10 @@ app.get('/api/getFailureCount', (req, res) => {
     });
 });
 
+
 app.post('/api/insert', (req, res) => {
     const b = req.body;
+
     const dateTime = new Date(b.timeStarted);
     const sqlInsert = "INSERT INTO printjob (printerName, files, usage_g, timeStarted, status, name, supervisorName, " +
         "notes, partNames, email, personalFilament) VALUES (?,?,?,?,?,?,?,?,?,?,?)";
@@ -908,7 +849,52 @@ app.post('/api/insert', (req, res) => {
             b.notes, b.partNames, b.email, b.personalFilament], (err, result) => {
                 if (err) {
                     console.log(err);
-                    res.status(500).send("Error inserting printer");
+                    res.status(500).send("Error inserting printjob");
+                    connection.release();
+                    return;
+                }
+                res.send(result);
+                connection.release();
+            });
+        });
+    });
+
+    // Now save the new filament amount to the file 
+    let localData = loadLocalData()
+    let newStock = Math.max(0, localData?.filamentStock - b.usage_g)
+    saveLocalData({ ...localData, filamentStock: newStock })
+
+    // send an email if we just crossed under the threshold
+    if ((localData.filamentStock >= localData.filamentThreshold) && (newStock < localData.filamentThreshold)) {
+        let emailParams = {
+            to: 'print3d@purdue.edu',
+            subject: 'ALERT - Lab Filament Stock Low!',
+            text: `Warning: the lab organizer has detected that our filament stock has ` +
+                `just fallen below the minimum threshold of ${parseInt(localData.filamentThreshold).toLocaleString()}g.` +
+                `\n\nPlease consider restocking it soon!`
+        }
+        sendEmail(emailParams)
+    }
+});
+
+
+app.post('/api/insertMember', (req, res) => {
+    const b = req.body;
+
+    const dateTime = new Date(b.lastUpdated);
+    const sqlInsert = "INSERT INTO member (lastUpdated, name, email, discordUsername) VALUES (?,?,?,?)";
+
+    pool.getConnection((err, connection) => {
+        if (err) {
+            console.error('Error getting connection from pool:', err);
+            res.status(500).send("Error accessing the database");
+            return;
+        }
+        connection.beginTransaction(function (err) {
+            connection.query(sqlInsert, [dateTime, b.name, b.email, b.discordUsername], (err, result) => {
+                if (err) {
+                    console.log(err);
+                    res.status(500).send("Error inserting printjob");
                     connection.release();
                     return;
                 }
@@ -919,8 +905,10 @@ app.post('/api/insert', (req, res) => {
     });
 });
 
-app.delete('/api/cancelPrint/:printerName', (req, res) => {
+app.delete('/api/cancelPrint/:printerName/:usage', (req, res) => {
     const printerName = req.params.printerName;
+    const usageRefund = req.params.usage;
+
     const sqlDelete = 'DELETE FROM printJob WHERE printerName=? AND status = "active"';
     pool.getConnection((err, connection) => {
         if (err) {
@@ -936,6 +924,12 @@ app.delete('/api/cancelPrint/:printerName', (req, res) => {
                     connection.release();
                     return;
                 }
+                
+                // Refund the filament usage
+                let localData = loadLocalData();
+                let newStock = Math.max(0, parseInt(localData?.filamentStock) + parseInt(usageRefund));
+                saveLocalData({ ...localData, filamentStock: newStock });
+
                 res.send(result);
                 connection.release();
             });
@@ -967,7 +961,29 @@ app.delete('/api/deleteJob/:jobID', (req, res) => {
         });
     });
 });
-
+app.delete('/api/deleteMember/:memberID', (req, res) => {
+    const memberID = req.params.memberID;
+    const sqlDelete = 'DELETE FROM member WHERE memberID=?';
+    pool.getConnection((err, connection) => {
+        if (err) {
+            console.error('Error getting connection from pool:', err);
+            res.status(500).send("Error accessing the database");
+            return;
+        }
+        connection.beginTransaction(function (err) {
+            connection.query(sqlDelete, memberID, (err, result) => {
+                if (err) {
+                    console.log(err);
+                    res.status(500).send("Error deleting printJob");
+                    connection.release();
+                    return;
+                }
+                res.send(result);
+                connection.release();
+            });
+        });
+    });
+});
 
 app.put('/api/update', (req, res) => {
     const { table, column, val, id } = req.body;
@@ -1008,8 +1024,8 @@ app.put('/api/update', (req, res) => {
 });
 
 app.put('/api/updateJob', (req, res) => {
-    const { email, files, jobID, name, partNames, personalFilament, status, supervisorName, usage_g, notes } = req.body;
-    let sqlUpdate = `UPDATE printjob SET email = ?, files = ?, name = ?, partNames = ?, personalFilament = ?, status = ?, supervisorName = ?, usage_g = ?, notes=? WHERE jobID = ?`;
+    const { email, files, printerName, jobID, name, partNames, personalFilament, status, supervisorName, usage_g, notes } = req.body;
+    let sqlUpdate = `UPDATE printjob SET email = ?, files = ?, printerName = ?, name = ?, partNames = ?, personalFilament = ?, status = ?, supervisorName = ?, usage_g = ?, notes=? WHERE jobID = ?`;
 
     pool.getConnection((err, connection) => {
         if (err) {
@@ -1018,7 +1034,7 @@ app.put('/api/updateJob', (req, res) => {
             return;
         }
         connection.beginTransaction(function (err) {
-            connection.query(sqlUpdate, [email, files, name, partNames, personalFilament, status, supervisorName, usage_g, notes, jobID], (err, result) => {
+            connection.query(sqlUpdate, [email, files, printerName, name, partNames, personalFilament, status, supervisorName, usage_g, notes, jobID], (err, result) => {
                 if (err) {
                     console.log(err);
                     res.status(500).send("Error updating database");
@@ -1026,6 +1042,32 @@ app.put('/api/updateJob', (req, res) => {
                     return;
                 }
 
+                res.send(result);
+                connection.release();
+            });
+        });
+    });
+});
+
+app.put('/api/updateMember', (req, res) => {
+    const { name, email, lastUpdated, memberID, discordUsername } = req.body;
+    let sqlUpdate = `UPDATE member SET name=?, email=?, lastUpdated=?, discordUsername=? WHERE memberID = ?`;
+
+    pool.getConnection((err, connection) => {
+        if (err) {
+            console.error('Error getting connection from pool:', err);
+            res.status(500).send("Error accessing the database");
+            return;
+        }
+
+        connection.beginTransaction(function (err) {
+            connection.query(sqlUpdate, [name, email, new Date(lastUpdated), discordUsername, memberID], (err, result) => {
+                if (err) {
+                    console.log(err);
+                    res.status(500).send("Error updating database");
+                    connection.release();
+                    return;
+                }
                 res.send(result);
                 connection.release();
             });

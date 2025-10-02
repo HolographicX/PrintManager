@@ -3,11 +3,12 @@ import CryptoJS from 'crypto-js';
 import React, { useEffect, useRef, useState } from 'react';
 import { Pie } from 'react-chartjs-2';
 import './App.css';
-import { ReactComponent as ExitIcon } from './images/exit.svg';
+import exitIcon from '/images/cancel.svg';
 
-import loadingGif from './images/loading.gif'
-import xIcon from './images/x.png'
+import loadingGif from '/images/loading.gif'
+import xIcon from '/images/x.png'
 
+import TrendingPrints from './TrendingPrints'
 import StlPreview from './StlPreview';
 import Settings from './Settings';
 import Sidebar from './Sidebar';
@@ -17,12 +18,17 @@ import ErrorBoundary from './ErrorBoundary';
 
 
 function App() {
+  const statusIconFolder = '/images/statusIcons'
+  const SPECIAL_FILAMENT_APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbziM-dySFGyjXCtK9cWPntqvg8lFSVJPcJ9CjI7Vm5mJhTmyIbvZh7Wbht44pmfnwzoww/exec'
+  const MAIN_APP_SCRIPT_URL = 'https://script.google.com/macros/s/AKfycbyMTIphmSEMiWof46LvuMCZYyONi3wqAbaxzjKXTFxQ8gNQd84Wzct7GsidBwQjyQld/exec'
+
   const [serverURL, setServerURL] = useState(" http://localhost:3001");// tailscale remote http://100.68.78.107
 
-  const [sidebarWidth, setSidebarWidth] = useState(225); // Initial sidebar width set to 225
+  const [sidebarWidth, setSidebarWidth] = useState(250); // Initial sidebar width set to 250
   const minSidebarWidth = 180;
   const [isResizing, setIsResizing] = useState(false);
   const [sidebarOpen, setSidebarOpen] = useState(true);
+
 
   const [formData, setFormData] = useState(null)
   const [filamentUsage, setFilamentUsage] = useState('');
@@ -38,6 +44,7 @@ function App() {
   const [personalFilament, setPersonalFilament] = useState(false);
 
   const [selectedPrinter, selectPrinter] = useState(null);
+  const [moveSelect, setMoveSelect] = useState("");
 
   const [menuOpen, setMenuOpen] = useState(false);
   const [adminPswd, setAdminPswd] = useState('');
@@ -46,6 +53,8 @@ function App() {
   const [feedbackText, setFeedbackText] = useState('');
 
   const [printerList, setPrinterList] = useState([]);
+  const [memberList, setMemberList] = useState([]);
+
   const printerRefs = useRef([]);
 
   const [printerNotes, setPrinterNotes] = useState(null);
@@ -94,6 +103,10 @@ function App() {
 
   const popupTime = 8000;
 
+  const canvas = document.createElement("canvas");
+  const context = canvas.getContext("2d");
+  context.font = "16pt Trebuchet MS";
+
   // const getFilenameFromLink = async (link) => {
   //   try {
   //     Axios.get(`${serverURL}/api/getFileName?link=${link}`).then((response) => {
@@ -107,11 +120,38 @@ function App() {
   //   }
   // }
 
+  const openToBusy = (status) => {
+    return status === 'admin' ? 'admin-busy' : status === 'testing' ? 'testing-busy' : 'busy'
+  }
+  const busyToOpen = (status) => {
+    return status === 'admin-busy' ? 'admin' : status === 'testing-busy' ? 'testing' : 'available'
+  }
+
+  const mapStatusToIcon = (status) => {
+    if (selectedPrinter.status?.slice(-4) === "busy") {
+      return `${statusIconFolder}/busy.svg`;
+    } if (selectedPrinter.status === 'available') {
+      return `${statusIconFolder}/available.svg`;
+    } if (selectedPrinter.status === 'admin') {
+      if (isAdmin) {
+        return `${statusIconFolder}/available.svg`;
+      } else {
+        return `${statusIconFolder}/admin.svg`;
+      }
+    } if (selectedPrinter.status === 'broken') {
+      return `${statusIconFolder}/broken.svg`;
+    }
+    // testing status included
+    return `${statusIconFolder}/testing.svg`;
+  }
+
   const getStatMsgColor = () => {
     if (selectedPrinter.status === 'busy') {
       return 'rgb(249, 249, 202)';
     } if (selectedPrinter.status === 'admin-busy') {
       return 'rgb(253, 253, 180)';
+    } if (selectedPrinter.status === 'testing-busy') {
+      return 'rgba(241, 241, 241, 1)';
     } if (selectedPrinter.status === 'available') {
       return 'rgb(223, 251, 222)';
     } if (selectedPrinter.status === 'admin') {
@@ -136,13 +176,14 @@ function App() {
   //fill data arrays on the initial render
   useEffect(() => {
     try {
-      Axios.get(`${serverURL}/api/get`).then((response) => {
+      Axios.get(`${serverURL}/api/get?query=${"SELECT * FROM printer"}`).then((response) => {
         console.log(response);
 
-        const sorted = sortPrinterList(response.data.printers, printerSort)
+        const sorted = sortPrinterList(response.data.result, printerSort)
         setPrinterList(sorted);
         console.log("setting printers to data: ", sorted);
       }).catch(e => {
+        console.error("Error fetching printer data: ", e)
         setLoading('error')
       });
     } catch (error) {
@@ -150,6 +191,23 @@ function App() {
     }
 
   }, [serverURL, printerSort, selectedPrinter]);
+
+  // fill member list
+  useEffect(() => {
+    try {
+      Axios.get(`${serverURL}/api/get?query=${"SELECT * FROM member"}`).then((response) => {
+        let members = response.data.result
+        console.log('member list: ', members);
+
+        setMemberList(members);
+      }).catch(e => {
+        console.error('Error in fetching member list: ', e)
+      });
+    } catch (error) {
+      console.error("Error fetching member list: ", error);
+    }
+  }, [serverURL]);
+
 
 
   // update printRefs whenever printerList changes
@@ -219,7 +277,7 @@ function App() {
       if (printerList.length === 0) {
         return;
       }
-      
+
       // fetch recent files
       try {
         Axios.get(`${serverURL}/api/getRecentFiles`).then((response) => {
@@ -247,21 +305,21 @@ function App() {
 
         try {
           Axios.get(`${serverURL}/api/getDailyPrint`, { timeout: 180000 }).then((response) => {
-            let dailyPrintTemp = response.data.partLinks;
-            console.log('Fetched daily print data: ', dailyPrintTemp)
-            let newDailyPrint = [];
-            for (let fileno in dailyPrintTemp) {
-              let fileName = dailyPrintTemp[fileno].slice(dailyPrintTemp[fileno].lastIndexOf('/') + 1).trim();
-              console.log('daily print file name: ', fileName);
-              newDailyPrint.push({
-                "name": fileName,
-                "file": dailyPrintTemp[fileno]
-              });
-            }
+            let dailyPrintTemp = response.data;
+            // let newDailyPrint = []; 
+            // for (let fileno in dailyPrintTemp) {
+            //   let fileName = dailyPrintTemp[fileno].slice(dailyPrintTemp[fileno].lastIndexOf('/') + 1).trim();
+            //   console.log('trending print file name: ', fileName);
+            //   newDailyPrint.push({
+            //     "name": fileName,
+            //     "file": dailyPrintTemp[fileno]
+            //   });
+            // }
 
-            console.log('setting daily print: ', newDailyPrint);
+            console.log('setting trending print: ', dailyPrintTemp);
             setPotdStatus('done')
-            setDailyPrint({ 'parts': newDailyPrint, 'pageLink': response.data.pageLink, 'pageName': response.data.pageName });
+            // setDailyPrint({ 'parts': dailyPrintTemp, 'pageLink': response.data.pageLink, 'pageName': response.data.pageName });
+            setDailyPrint(dailyPrintTemp);
           }).catch(e => {
             setPotdStatus('error')
           });
@@ -318,7 +376,7 @@ function App() {
                     const club = dailyData.filter(item => !item.personalFilament)
 
                     const startDate = dailyData.length > 0 ? dailyData[0].date : null;
-                    const endDate = dailyData.length > 0 ? dailyData[dailyData.length - 1].date : null;
+                    const endDate = dailyData.length > 0 ? formatDate(new Date().toISOString(), false) : null; //dailyData[dailyData.length - 1].date
                     if (startDate && endDate) {
                       const allDates = generateDateRange(startDate, endDate);
 
@@ -400,6 +458,10 @@ function App() {
     };
   })
 
+
+
+
+
   const toggleSTLPreviews = () => {
     console.log('setting STLPreviews to ', !showSTLPreviews);
     setShowSTLPreviews(!showSTLPreviews);
@@ -418,7 +480,7 @@ function App() {
   }
 
   const refreshHistory = () => {
-    Axios.get(`${serverURL}/api/getHistory?value=${selectedPrinter.printerName}&field=printerName`).then((response) => {
+    Axios.get(`${serverURL}/api/getHistory?value=${selectedPrinter?.printerName}&field=printerName`).then((response) => {
       const newHistory = response.data.historyList.sort((a, b) => new Date(b.timeStarted) - new Date(a.timeStarted))
       setHistoryList(newHistory);
       console.log('Got history list:')
@@ -439,60 +501,34 @@ function App() {
     }
   }
 
-  const handleEditClick = (job) => {
-    const editingJobFilt = {
-      jobID: editingJob.jobID,
-      files: truncateString(editingJob.files, 512),
-      usage_g: Math.round(parseFloat(editingJob.usage_g)) > 2147483647 ? 2147483647 : Math.round(parseFloat(editingJob.usage_g)),
-      status: editingJob.status,
-      name: truncateString(editingJob.name, 64),
-      supervisor: truncateString(editingJob.supervisorName, 64),
-      partNames: truncateString(editingJob.partNames, 256),
-      email: truncateString(editingJob.email, 64),
-      personalFilament: editingJob.personalFilament,
-      notes: truncateString(editingJob.notes, 256)
-    }
-    if(!selectedPrinter){
-      console.log('No printer selected in saving history job, exiting early...')
-      return;
-    }
-    if (editingJobFilt.jobID === job.jobID) {
-      if (editingJobFilt.status !== job.status) {
-        // if the job was made active again, set printer status to busy
-        if ((editingJobFilt.status === 'active')) {
-          handlePrinterStatusChange(selectedPrinter.status === 'admin' ? 'admin-busy' : 'busy');
-          setCurJob(editingJobFilt);
-          selectedPrinter.currentJob = editingJobFilt.jobID;
+  // update the printer's status from active to inactive
+  const activeToInactive = (refPrinter) => {
+    console.log('Changing', refPrinter.printerName, 'status to inactive')
 
-          //set all other active jobs to completed, then update this job to be active
-          Axios.put(`${serverURL}/api/update`, {
-            table: "printjob",
-            column: "status",
-            id: selectedPrinter.printerName,
-            val: 'completed'
-          }).then(() => {
-            updateTable("printer", "currentJob", selectedPrinter.printerName, editingJobFilt.jobID, () => {
-              saveJob();
-            });
-          });
-        }
-        // if the job status was changed from active, set the printer status to available or admin and reset currentJob
-        else if (job.status === 'active') {
-          updateTable("printer", "currentJob", selectedPrinter.printerName, '', () => {
-            handlePrinterStatusChange(selectedPrinter.status === 'admin-busy' ? 'admin' : 'available');
-            saveJob();
-          })
-          selectedPrinter.currentJob = ''
-        } else {
-          saveJob();
-        }
-      } else {
+    updateTable("printer", "currentJob", refPrinter.printerName, '', () => {
+      handlePrinterStatusChange(busyToOpen(refPrinter.status), refPrinter);
+      saveJob();
+    })
+    refPrinter.currentJob = ''
+  }
+
+  const inactiveToActive = (refPrinter, editingJobFilt) => {
+    console.log('Changing', refPrinter.printerName, 'status to active')
+    handlePrinterStatusChange(refPrinter.status === 'admin' ? 'admin-busy' : refPrinter.status === 'testing' ? 'testing-busy' : 'busy', refPrinter);
+    setCurJob(editingJobFilt);
+    refPrinter.currentJob = editingJobFilt.jobID;
+
+    //set all other active jobs to completed, then update this job to be active
+    Axios.put(`${serverURL}/api/update`, {
+      table: "printjob",
+      column: "status",
+      id: refPrinter.printerName,
+      val: 'completed'
+    }).then(() => {
+      updateTable("printer", "currentJob", refPrinter.printerName, editingJobFilt.jobID, () => {
         saveJob();
-      }
-    } else {
-      setEditingJob(job);
-      console.log('Editing job: ' + job.jobID);
-    }
+      });
+    });
   }
 
   const handleDeleteJob = (jobID) => {
@@ -513,6 +549,101 @@ function App() {
       console.error('Error:', error);
     });
   }
+
+
+
+  const handleEditClick = (job) => {
+    const editingJobFilt = {
+      jobID: editingJob.jobID,
+      files: truncateString(editingJob.files, 512),
+      usage_g: Math.round(parseFloat(editingJob.usage_g)) > 2147483647 ? 2147483647 : Math.round(parseFloat(editingJob.usage_g)),
+      status: editingJob.status,
+      name: truncateString(editingJob.name, 64),
+      supervisor: truncateString(editingJob.supervisorName, 64),
+      partNames: truncateString(editingJob.partNames, 256),
+      email: truncateString(editingJob.email, 64),
+      personalFilament: editingJob.personalFilament,
+      notes: truncateString(editingJob.notes, 256)
+    }
+
+    let refPrinter = selectedPrinter;
+
+    // This is the comprehensive history table in the lab summary page
+    if (!refPrinter) {
+      console.log('No referencedPrinter, searching in printerList...')
+      // look up the printer name in the printer list to use it later
+      refPrinter = printerList.find(printer => printer.printerName === job.printerName);
+      console.log('Found printer: ', refPrinter)
+
+      if (!refPrinter) {
+        console.log('Could not find the reference printer in printerList, edit not allowed.')
+        return;
+      }
+    }
+
+    // save the edits
+    if (editingJobFilt.jobID === job.jobID) {
+      if (!printerList.map(printer => printer.printerName).includes(editingJob.printerName)) {
+        console.log('Cannot set new printer name: Printer does not exist!')
+        showMsgForDuration(`Cannot save job: Printer "${editingJob.printerName}" doesn't exist!`, 'err');
+        setEditingJob({ ...editingJob, jobID: -1 });
+        return;
+      }
+
+      if (editingJobFilt.status !== job.status) {
+        // handle different cases where the printer name was changed too, so we need different behavior
+        if (job.printerName !== editingJob.printerName) {
+          let destPrinter = printerList.find(printer => printer.printerName === editingJob.printerName)
+
+          // job changed from inactive to active
+          if ((editingJobFilt.status === 'active')) {
+            // change only the destination printer to active
+            inactiveToActive(destPrinter, editingJobFilt);
+          }
+          // job changed from active to inactive
+          else if (job.status === 'active') {
+            // change only the destination printer to inactive
+            activeToInactive(refPrinter);
+          } else {
+            // otherwise, just save the job (no active status was changed)
+            saveJob();
+          }
+        } else {
+          // if the job was made active again, set printer status to busy
+          if ((editingJobFilt.status === 'active')) {
+            inactiveToActive(refPrinter, editingJobFilt);
+          }
+          // if the job status was changed from active, set the printer status to available or admin and reset currentJob
+          else if (job.status === 'active') {
+            activeToInactive(refPrinter);
+          } else {
+            // otherwise, just save the job (no active status was changed)
+            saveJob();
+          }
+        }
+      } else {
+        console.log('status did not change')
+        console.log('editingJob name: ', editingJob.printerName, ' | job name: ', job.printerName)
+        // if the printer was changed, and the status is active, then we need to update the printer status of both printers
+        // source -- busy to inactive   |   destination -- inactive to busy
+        if ((job.printerName !== editingJob.printerName) && (job.status === 'active')) {
+          console.log('active to active printer name change detected')
+          let destPrinter = printerList.find(printer => printer.printerName === editingJob.printerName)
+          // set the source printer to inactive
+          activeToInactive(refPrinter);
+          //set the destination printer to active
+          inactiveToActive(destPrinter, editingJobFilt);
+        } else {
+          saveJob();
+        }
+      }
+    } else {
+      // change the job to edit, discard previous changes
+      setEditingJob(job);
+      console.log('Editing job: ', job);
+    }
+  }
+
 
   const handlePrinterSort = (e) => {
     const newSort = e.target.value;
@@ -572,37 +703,83 @@ function App() {
     setnotes('');
     setpartnames('');
   }
-  const autofillFields = () => {
-    setname(curJob.name);
-    setemail(curJob.email);
-    setsupervisor(curJob.supervisorName);
-    setpartnames(curJob.partNames);
-    setfiles(curJob.files);
-    setFilamentUsage(curJob.usage_g);
-    setnotes(curJob.notes);
-    setSupervisorPrint(curJob.name === curJob.supervisorName);
-    setPersonalFilament(curJob.personalFilament);
+  const autofillFields = (job) => {
+    setname(job.name);
+    setFilamentUsage(job.usage_g);
+    setemail(job.email);
+    setsupervisor(job.supervisorName);
+    setpartnames(job.partNames);
+    setfiles(job.files);
+    setnotes(job.notes);
+    setSupervisorPrint(job.name === job.supervisorName);
+    setPersonalFilament(job.personalFilament);
   }
 
   const cancelPrint = () => {
-    autofillFields();
-    fetch(`${serverURL}/api/cancelPrint/${selectedPrinter.printerName}`, { method: 'DELETE', }).then(response => {
+    autofillFields(curJob);
+    fetch(`${serverURL}/api/cancelPrint/${selectedPrinter.printerName}/${curJob.usage_g}`, { method: 'DELETE', }).then(response => {
       if (!response.ok) {
         throw new Error('Network response was not ok');
       }
       return response.json();
     }).then(data => {
       updateTable("printer", "currentJob", selectedPrinter.printerName, '', () => {
-        handlePrinterStatusChange(selectedPrinter.status === 'admin-busy' ? 'admin' : 'available')
+        handlePrinterStatusChange(busyToOpen(selectedPrinter.status))
       })
     }).catch(error => {
       console.error('Error:', error);
     });
   }
 
+  const movePrint = (printerName) => {
+    console.log(`moving current print from ${selectedPrinter.printerName} to ${printerName}...`);
+
+    let newPrinter = printerList.find(p => p.printerName === printerName);
+
+
+
+
+
+    //update the new printer's status to active    
+    console.log('Changing', newPrinter.printerName, 'status to active')
+    handlePrinterStatusChange(newPrinter.status === 'admin' ? 'admin-busy' : 'busy', newPrinter);
+    newPrinter.currentJob = curJob.jobID;
+
+    //set all other active jobs to completed, then update this job to be active
+    Axios.put(`${serverURL}/api/update`, {
+      table: "printjob",
+      column: "status",
+      id: newPrinter.printerName,
+      val: 'completed'
+    }).then(() => {
+      updateTable("printer", "currentJob", newPrinter.printerName, curJob.jobID, () => {
+        // update the current job to point to the new printer
+        Axios.put(`${serverURL}/api/update`, {
+          table: "queue", // update printJob by jobID
+          column: "printerName",
+          id: curJob.jobID,
+          val: printerName
+        }).then(() => {
+          // update the selected printer's status from active to inactive
+          console.log('Changing', selectedPrinter.printerName, 'status to inactive')
+
+          updateTable("printer", "currentJob", selectedPrinter.printerName, '', () => {
+            handlePrinterStatusChange(busyToOpen(selectedPrinter.status), selectedPrinter);
+            selectedPrinter.currentJob = ''
+            setCurJob(null);
+          })
+        });
+      });
+    });
+
+
+
+
+  }
+
   const sortPrinterList = (list, by = 'Availability') => {
     let sortedPrinters = []
-    const availabilityOrder = ['available', 'admin', 'busy', 'admin-busy', 'testing', 'broken'];
+    const availabilityOrder = ['available', 'admin', 'busy', 'admin-busy', 'testing-busy', 'testing', 'broken'];
 
     if (by === 'Availability') {
       sortedPrinters = list.sort((a, b) => {
@@ -650,6 +827,10 @@ function App() {
       return driveLink;
     }
   }
+  async function sleep(time) {
+    await new Promise(resolve => setTimeout(resolve, time))
+  }
+
 
   function handleCollapseSidebar() {
     setSidebarOpen(!sidebarOpen);
@@ -689,27 +870,28 @@ function App() {
 
   function getStatusColor(printerStatus) {
     switch (printerStatus) {
-      case "available": return "rgb(80, 210, 100)";
-      case "busy": return "rgb(235, 235, 60)";
-      case "broken": return "rgb(255, 100, 100)";
+      case "available": return "rgb(104, 216, 121)";
+      case "busy": return "rgb(237, 237, 80)";
+      case "broken": return "rgb(255, 138, 138)";
       case "testing": return "rgb(255,255,255)";
-      case "admin": return "rgb(100, 180, 100)";
-      case "admin-busy": return "rgb(220, 200, 70)";
+      case "testing-busy": return "rgb(214, 214, 214)";
+      case "admin": return "rgb(117, 181, 117)";
+      case "admin-busy": return "rgb(220, 205, 103)";
       default: return "silver";
     }
   }
 
   const getStatMsg = () => {
-    if (((selectedPrinter.status === 'busy') || (selectedPrinter.status === 'admin-busy')) && curJob) {
+    if ((selectedPrinter.status?.slice(-4) === 'busy') && curJob) {
       return ("This printer is busy printing: " + ((!curJob.partNames) ? 'No parts specified.' : truncateString(curJob.partNames, 80)))
     } else if (selectedPrinter.status === 'available') {
       return ("This printer is available!")
     } else if (selectedPrinter.status === 'broken') {
       return ("This printer is broken... (0_0)")
     } else if (selectedPrinter.status === 'testing') {
-      return ("This printer is currently in testing, and is not available to print on.")
+      return ("This printer is currently in testing.")
     } else if ((selectedPrinter.status === 'admin') && !isAdmin) {
-      return ("This printer is only available for admins. Please contact an officer if you would like to use this printer.")
+      return ("This printer is only available for admins. Please contact an officer or lab advisor to use it.")
     } else if ((selectedPrinter.status === 'admin') && isAdmin) {
       return ("This printer is available for you to print on!")
     } else {
@@ -722,10 +904,10 @@ function App() {
     console.log('given pswd: ' + hash)
     console.log('actual pswd: ' + actual)
     if (hash === actual) {
-      showMsgForDuration("Logged in as Admin!", 'msg', popupTime);
+      showMsgForDuration("Logged in as Admin!", 'msg');
       handleIsAdminChange(true)
     } else {
-      showMsgForDuration("Incorrect Password.", 'err', popupTime);
+      showMsgForDuration("Incorrect Password.", 'err');
     }
     setAdminPswd('')
   }
@@ -741,11 +923,11 @@ function App() {
           case 'Backspace':
             selectPrinter(null)
             break;
-          case 'ArrowLeft':
+          case 'ArrowUp':
             e.preventDefault();
             movePrinter(-1);
             break;
-          case 'ArrowRight':
+          case 'ArrowDown':
             e.preventDefault();
             movePrinter(1);
             break;
@@ -779,7 +961,7 @@ function App() {
 
     if (menuOpen && (e.key === 'Enter')) {
       if (e.target.id === "adminInput") {
-        checkPswd(adminPswd, process.env.REACT_APP_ADMIN_PSWD)
+        checkPswd(adminPswd, import.meta.env.VITE_ADMIN_PSWD)
       } else if (e.target.id === 'URLInput') {
         setServerURL(e.target.value)
       } else if (e.target.id === "subjectInput" || e.target.id === "feedbackInput") {
@@ -790,9 +972,9 @@ function App() {
 
   const handleFeedbackClick = () => {
     if (feedbackSubject.length <= 0) {
-      showMsgForDuration("No Feedback Subject! Not sent.", 'err', popupTime)
+      showMsgForDuration("No Feedback Subject! Not sent.", 'err')
     } else if (feedbackText.length <= 0) {
-      showMsgForDuration("No Feedback Text! Not sent.", 'err', popupTime)
+      showMsgForDuration("No Feedback Text! Not sent.", 'err')
     } else {
       sendMail('PrintManager Feedback - ' + feedbackSubject, feedbackText, "print3d@purdue.edu")
       setFeedbackSubject('')
@@ -825,6 +1007,21 @@ function App() {
     return str;
   }
 
+  function truncateStringWidth(str, maxWidth) {
+    if (!str) return "";
+
+    let truncated = "";
+    for (let i = 0; i < str.length; i++) {
+      const testStr = truncated + str[i];
+      const metrics = context.measureText(testStr + "...");
+      if (metrics.width > maxWidth) {
+        return truncated + "...";
+      }
+      truncated = testStr;
+    }
+    return truncated;
+  }
+
   const updateTable = (table, column1, id, val, callback) => {
     try {
       Axios.put(`${serverURL}/api/update`, {
@@ -842,19 +1039,19 @@ function App() {
     }
   };
 
-  const handlePrinterStatusChange = (statusArg) => {
-    console.log('changing printer ' + selectedPrinter.printerName + '\'s status to ' + statusArg)
+  const handlePrinterStatusChange = (statusArg, refPrinter = selectedPrinter) => {
+    console.log('changing printer ' + refPrinter.printerName + '\'s status to ' + statusArg)
     //first, update the database to have the new printer status
-    updateTable("printer", "status", selectedPrinter.printerName, statusArg, () => {
+    updateTable("printer", "status", refPrinter.printerName, statusArg, () => {
       //then, update the local printer array to reflect this change
       const updatedPrinterList = printerList.map(printer => {
-        if (printer.printerName === selectedPrinter.printerName) {
+        if (printer.printerName === refPrinter.printerName) {
           return { ...printer, status: statusArg };
         }
         return printer;
       });
       setPrinterList(sortPrinterList(updatedPrinterList, printerSort));
-      selectedPrinter.status = statusArg;
+      refPrinter.status = statusArg;
     });
   };
 
@@ -868,16 +1065,13 @@ function App() {
     // get the latest queued print, and if it doesnt exist, show an error popup
     let queue = historyList.filter(item => item.status === 'queued')
     let toRelease = queue[queue.length - 1]
-    console.log('-----asdasd')
-    console.log(queue)
-    console.log(toRelease)
     // edge case handling
     if ((queue.length <= 0) || !toRelease) {
-      showMsgForDuration('No jobs in queue! Print not started.', 'err', popupTime);
+      showMsgForDuration('No jobs in queue! Print not started.', 'err');
       return;
     }
     if (!((selectedPrinter.status === 'available') || (selectedPrinter.status === 'admin'))) {
-      showMsgForDuration('Printer is busy! Finish current job first.', 'err', popupTime);
+      showMsgForDuration('Printer is busy! Finish current job first.', 'err');
       return;
     }
 
@@ -891,11 +1085,11 @@ function App() {
       // add the jobID to the printer
       updateTable("printer", "currentJob", selectedPrinter.printerName, toRelease.jobID, () => {
         //update the printer status
-        updateTable("printer", "status", selectedPrinter.printerName, selectedPrinter.status === 'admin' ? 'admin-busy' : "busy", () => {
+        updateTable("printer", "status", selectedPrinter.printerName, openToBusy(selectedPrinter.status), () => {
           const updatedPrinterList = printerList.map(printer => {
             if (printer.printerName === selectedPrinter.printerName) {
               let newPrinter = {
-                ...printer, status: selectedPrinter.status === 'admin' ? 'admin-busy' : "busy",
+                ...printer, status: openToBusy(selectedPrinter.status),
                 currentJob: toRelease.jobID
               }
               selectPrinter(newPrinter)
@@ -904,11 +1098,10 @@ function App() {
             return printer;
           });
           setPrinterList(sortPrinterList(updatedPrinterList, printerSort));
-          showMsgForDuration('Resin print successfully started!', 'msg', popupTime)
+          showMsgForDuration('Resin print successfully started!', 'msg')
         })
       });
     });
-
   }
 
   const handleStartPrintClick = (queue = false) => {
@@ -916,30 +1109,31 @@ function App() {
 
     if (selectedPrinter !== null) {
       //check for incorrect or empty values
-      if (selectedPrinter.status !== 'available' && selectedPrinter.status !== 'admin' && selectedPrinter.filamentType !== 'Resin') {
-        showMsgForDuration("This printer is not available!", 'err', popupTime);
+      if (selectedPrinter.status !== 'available' && selectedPrinter.status !== 'admin' && 
+        selectedPrinter.status !== 'testing' && selectedPrinter.filamentType !== 'Resin') {
+        showMsgForDuration("This printer is not available!", 'err');
       } else if (selectedPrinter.status === 'admin' && !isAdmin) {
-        showMsgForDuration("This printer is not available!", 'err', popupTime);
+        showMsgForDuration("This printer is not available!", 'err');
       } else if (name.length === 0) {
         console.log("startPrintClick: err: no name");
-        showMsgForDuration("No Name! Print not started.", 'err', popupTime);
+        showMsgForDuration("No Name! Print not started.", 'err');
       } else if ((email.length === 0) && !supervisorPrint) {
         console.log("startPrintClick: err: no email");
-        showMsgForDuration("No Email! Print not started.", 'err', popupTime);
+        showMsgForDuration("No Email! Print not started.", 'err');
       } else if ((supervisor.length === 0) && !supervisorPrint) {
         console.log("startPrintClick: err: no supervisor");
-        showMsgForDuration("No Supervisor! Print not started.", 'err', popupTime);
+        showMsgForDuration("No Supervisor! Print not started.", 'err');
       } else if ((partNames.length === 0)) {// && !supervisorPrint) {
         console.log("startPrintClick: err: no partNames");
-        showMsgForDuration("No Part Names! Print not started.", 'err', popupTime);
+        showMsgForDuration("No Part Names! Print not started.", 'err');
       } else if (files.length === 0) {
         console.log("startPrintClick: err: no files");
-        showMsgForDuration("No Files! Print not started.", 'err', popupTime);
+        showMsgForDuration("No Files! Print not started.", 'err');
       }
       else if ((filamentUsage === 0) || (filamentUsage === "")) {
         console.log("startPrintClick: err: no filamentUsage");
-        showMsgForDuration("No Filament Usage! Print not started.", 'err', popupTime);
-      } else if (historyList.filter(item => item.status === 'queued').some(job => {
+        showMsgForDuration("No Filament Usage! Print not started.", 'err');
+      } else if (queue && historyList.filter(item => item.status === 'queued').some(job => {
         if (job.name.toLowerCase() === name.toLowerCase()) {
           matchingJob = job;
           return true;
@@ -949,17 +1143,22 @@ function App() {
         console.log("startPrintClick: warn: duplicate name entry in queue");
         showMsgForDuration(`Warning: A job with this name is already queued!\nRemove it and continue?`, 'warn', popupTime + 5000, matchingJob);
       } else if (queue && (historyList.filter(item => item.status === 'queued').length >= 3)) {
-        console.log("startPrintClick: warn: already 5 queued resin prints");
-        showMsgForDuration("Resin queue is full! Print not queued.", 'err', popupTime);
-      } else if (queue) {
-        console.log("startPrintClick: warn: resin print costs $0.10 / ml");
-        showMsgForDuration(`Warning: Resin prints cost $0.15 / ml, even for members.`, 'warn', popupTime + 5000);
-      } else if ((selectedPrinter.filamentType === 'PETG') || (selectedPrinter.filamentType === 'TPU')) {
+        console.log("startPrintClick: warn: already 3 queued resin prints");
+        showMsgForDuration("Resin queue is full! Print not queued.", 'err');
+      } else if (((selectedPrinter.filamentType === 'PETG') || (selectedPrinter.filamentType === 'TPU')) && !personalFilament) {
         console.log("startPrintClick: warn: filament type not PLA");
         showMsgForDuration(`Warning: ${selectedPrinter.filamentType} costs $0.10 / g, even for members.\nPlease only use ${selectedPrinter.filamentType} filament on this printer!`, 'warn', popupTime + 5000);
+      }else if ((selectedPrinter.filamentType === 'Resin')) {
+        console.log("startPrintClick: warn: Resin filament type");
+        showMsgForDuration(`Warning: Resin costs $0.12 / ml,\neven for members.`, 'warn', popupTime + 5000);
       } else if (filamentUsage > 1000) {
         console.log("startPrintClick: warn: filamentUsage > 1000g");
-        showMsgForDuration("Warning: Filament Usage Exceeds 1kg\nContinue anyway?", 'warn', popupTime + 5000);
+        showMsgForDuration("Warning: Filament Usage Exceeds 1kg.\nContinue anyway?", 'warn', popupTime + 5000);
+      } else if (queue) {
+        console.log("startPrintClick: warn: resin print costs $0.10 / ml");
+        showMsgForDuration(`Warning: Resin prints cost $0.12 / ml,\nEven for club members.`, 'warn', popupTime + 5000);
+      } else if ((selectedPrinter.filamentType === 'PLA') && !personalFilament && !memberList.map(m => m.email).includes(email) && !supervisorPrint) {
+        showMsgForDuration(`Warning: Non-member detected. Pay-per-gram\nthrough TooCool is required. Continue?`, 'warn', popupTime + 5000);
       } else {
         //all fields have valid values...
         //clear all warning popups 
@@ -972,9 +1171,27 @@ function App() {
     };
   };
 
-  const handleWarningClick = (id, replaceJob) => {
-    setMessageQueue(prevQueue => prevQueue.filter(message => !message.msg.startsWith("Warning:")));
+  const buildFormJob = () => {
+    return ({
+      files: truncateString(files, 512),
+      usage_g: Math.round(parseFloat(filamentUsage)) > 2147483647 ? 2147483647 : Math.round(parseFloat(filamentUsage)),
+      timeStarted: new Date().toISOString(),
+      // status: selectedPrinter?.filamentType === 'Resin' ? "queued" : "active",
+      status: "active",
+      name: truncateString(name, 64),
+      supervisor: supervisorPrint ? truncateString(name, 64) : truncateString(supervisor, 64),
+      notes: truncateString(notes, 256),
+      partNames: truncateString(partNames, 256),
+      email: truncateString(email, 64),
+      personalFilament: personalFilament
+    })
+  }
 
+  const handleWarningClick = (notification) => {
+    const { id, msg, type, replaceJob, msgPrinter, msgJob } = notification
+    const isResin = msgPrinter?.filamentType === 'Resin'
+
+    setMessageQueue(prevQueue => prevQueue.filter(message => !message.msg.startsWith("Warning:")));
     if (replaceJob) {
       // delete the old queued job with the same name
       fetch(`${serverURL}/api/deleteJob/${replaceJob.jobID}`, { method: 'DELETE', }).then(response => {
@@ -995,51 +1212,42 @@ function App() {
 
         setHistoryList(updatedHistoryList);
 
-        // queue the new one
-        startPrint(true);
+        // queue the new one if resin
+        // startPrint(isResin, msgPrinter, msgJob);
+        startPrint(false, msgPrinter, msgJob);
 
       }).catch(error => {
         console.error('Error:', error);
       });
 
-
-
     } else {
-      startPrint();
+      // startPrint(isResin, msgPrinter, msgJob);
+      startPrint(false, msgPrinter, msgJob);
     }
   }
 
-  const startPrint = (queue = false) => {
+  const startPrint = (queue = false, formPrinter = selectedPrinter, formJob = buildFormJob()) => {
     try {
       Axios.post(`${serverURL}/api/insert`, {
-        printerName: selectedPrinter.printerName,
-        files: truncateString(files, 512),
-        usage_g: Math.round(parseFloat(filamentUsage)) > 2147483647 ? 2147483647 : Math.round(parseFloat(filamentUsage)),
-        timeStarted: new Date().toISOString(),
-        status: selectedPrinter.filamentType === 'Resin' ? "queued" : "active",
-        name: truncateString(name, 64),
-        supervisor: supervisorPrint ? truncateString(name, 64) : truncateString(supervisor, 64),
-        notes: truncateString(notes, 256),
-        partNames: truncateString(partNames, 256),
-        email: truncateString(email, 64),
-        personalFilament: personalFilament
+        printerName: formPrinter.printerName,
+        ...formJob
       }).then(() => {
         if (!queue) {
           setTimeout(() => {
             //update the current job of the printer that was selected for the print
             try {
-              Axios.get(`${serverURL}/api/getCurrentJob?printerName=${selectedPrinter.printerName}`).then((response) => {
+              Axios.get(`${serverURL}/api/getCurrentJob?printerName=${formPrinter.printerName}`).then((response) => {
                 console.log("CurrentJob data: ");
                 console.log(response.data);
                 //update the printer status of the printer that was given the job
-                updateTable("printer", "status", selectedPrinter.printerName, selectedPrinter.status === 'admin' ? "admin-busy" : "busy", () => {
+                updateTable("printer", "status", formPrinter.printerName, openToBusy(formPrinter.status), () => {
                   //update the currentJob of the printer that was used for the printJob
                   if (response.data.currentJob[0]) {
-                    updateTable("printer", "currentJob", selectedPrinter.printerName, response.data.currentJob[0].jobID, () => {
+                    updateTable("printer", "currentJob", formPrinter.printerName, response.data.currentJob[0].jobID, () => {
                       const updatedPrinterList = printerList.map(printer => {
-                        if (printer.printerName === selectedPrinter.printerName) {
+                        if (printer.printerName === formPrinter.printerName) {
                           let newPrinter = {
-                            ...printer, status: selectedPrinter.status === 'admin' ? 'admin-busy' : "busy",
+                            ...printer, status: openToBusy(formPrinter),
                             currentJob: response.data.currentJob[0].jobID
                           }
                           selectPrinter(newPrinter)
@@ -1056,9 +1264,9 @@ function App() {
               console.error("Error fetching printer data: ", error);
             }
           });
-          if (selectedPrinter.filamentType !== 'Resin') { clearFields(); }
+          if (formPrinter.filamentType !== 'Resin') { clearFields(); }
         } else {
-          Axios.get(`${serverURL}/api/getHistory?value=${selectedPrinter.printerName}&field=printerName`).then((response) => {
+          Axios.get(`${serverURL}/api/getHistory?value=${formPrinter.printerName}&field=printerName`).then((response) => {
             const newHistory = response.data.historyList.sort((a, b) => new Date(b.timeStarted) - new Date(a.timeStarted))
             setHistoryList(newHistory);
             console.log('Got history list:')
@@ -1071,27 +1279,27 @@ function App() {
       console.error('Error submitting printJob: ', error);
     }
 
-    showMsgForDuration(queue ? 'Print job queued!' : `Print job successfully started!`, 'msg', popupTime);
+    showMsgForDuration(queue ? 'Print job queued!' : `Print job successfully started!`, 'msg');
   };
 
 
   const sendMail = (subject, text, target = curJob.email,) => {
     if (target.length === 0) {
-      showMsgForDuration('Email not sent: No target', 'err', popupTime);
+      showMsgForDuration('Email not sent: No target', 'err');
     } else {
       Axios.post(`${serverURL}/api/send-email`, {
         to: target,
         subject: subject,
         text: text
       }).then(() => {
-        showMsgForDuration('Email Sent Successfully', 'msg', popupTime);
+        showMsgForDuration('Email Sent Successfully', 'msg');
       }).catch((error) => {
-        showMsgForDuration('Error Sending Email', popupTime);
+        showMsgForDuration('Error Sending Email');
         console.error('Error sending email:', error.response ? error.response.data : error.message);
       });
-
     }
   }
+
 
   const updatePrinterNotes = () => {
     //set the printJob status to statusArg
@@ -1120,7 +1328,7 @@ function App() {
     try {
       console.log("print done was clicked... setting printer status to available");
       //set status to available
-      updateTable("printer", "status", selectedPrinter.printerName, selectedPrinter.status === 'admin-busy' ? 'admin' : "available", () => {
+      updateTable("printer", "status", selectedPrinter.printerName, busyToOpen(selectedPrinter.status), () => {
 
         //set the printJob status to statusArg
         Axios.put(`${serverURL}/api/update`, {
@@ -1136,7 +1344,7 @@ function App() {
             //apply the changes locally
             const updatedPrinterList = printerList.map(printer => {
               if (printer.printerName === selectedPrinter.printerName) {
-                return { ...printer, status: selectedPrinter.status === 'admin-busy' ? 'admin' : "available", currentJob: "" };
+                return { ...printer, status: busyToOpen(selectedPrinter.status), currentJob: "" };
               }
               return printer;
             });
@@ -1169,7 +1377,7 @@ function App() {
                       if (failureCount >= 3) {
                         sendMail("3DPC: Print Failed", text);
                       } else {
-                        showMsgForDuration(`Email not sent. Failures: ${failureCount}`, 'msg', popupTime);
+                        showMsgForDuration(`Email not sent. Failures: ${failureCount}`, 'msg');
                       }
                     });
                   } catch (error) {
@@ -1178,15 +1386,15 @@ function App() {
                 }
 
               } catch (e) {
-                showMsgForDuration('Error Sending Email', 'err', popupTime);
+                showMsgForDuration('Error Sending Email', 'err');
                 console.log('Error sending email:', e);
               }
             } else {
               console.log('not sending email...')
-              showMsgForDuration('No Email Sent. (Disabled)', 'err', popupTime);
+              showMsgForDuration('No Email Sent. (Disabled)', 'msg');
             }
 
-            selectedPrinter.status = selectedPrinter.status === 'admin-busy' ? 'admin' : 'available';
+            selectedPrinter.status = busyToOpen(selectedPrinter.status);
             setCurJob(null)
 
             if (typeof callback === 'function') {
@@ -1205,7 +1413,7 @@ function App() {
 
     // if the print failed, fill in the print form data with the job's data
     if (statusArg === 'failed') {
-      autofillFields();
+      autofillFields(curJob);
     }
   };
 
@@ -1215,36 +1423,56 @@ function App() {
 
   const pullFormData = (e) => {
     try {
+      let specialFilament = selectedPrinter?.filamentType !== 'PLA';
+
       // old macro: 'https://script.google.com/macros/s/AKfycbwdMweriskP6srd5gir1qYlA3jRoTxA2YiHcbCt7555LoqBs_BZT-OfKUJiP53kihQV/exec'
-      const url = 'https://script.google.com/macros/s/AKfycbytjN8jEK8rcrjqrpQFUYezzeVH8k86GgYgR4NaIkvT95ScBpUwDw09g2JxrpyT1UTrMQ/exec';
+
+      const url = specialFilament ?
+        SPECIAL_FILAMENT_APP_SCRIPT_URL :
+        MAIN_APP_SCRIPT_URL;
 
       setFormDataLoading(true);
       fetch(url).then(response => response.json()).then(data => {
         if (data !== null && data.length > 0) {
           console.log('fetched form data: ');
           console.log(data)
-          showMsgForDuration('Form Data Retrieved Successfully!', 'msg', popupTime);
+          showMsgForDuration('Form Data Retrieved Successfully!', 'msg');
           setFormDataLoading(false);
 
 
-          let formattedData = data.map((job) => {
-            return ({
-              name: job[1],
-              email: job[2],
-              supervisorName: job[3],
-              files: job[4],
-              partNames: job[5],
-              notes: job[10]
+          let formattedData = specialFilament ?
+            data.map((job) => {
+              return ({
+                name: job[1],
+                email: job[2],
+                supervisorName: job[3],
+                material: job[4],
+                files: job[5],
+                partNames: job[6],
+                notes: job[11],
+                discord: job[12]
+              })
+            }) :
+            data.map((job) => {
+              return ({
+                name: job[1],
+                email: job[2],
+                supervisorName: job[3],
+                files: job[4],
+                partNames: job[5],
+                notes: job[10]
+              })
             })
-          })
-          setFormData(formattedData)
+
+
+          setFormData(formattedData.reverse())
 
         } else {
-          showMsgForDuration('Error Filling Form...', 'err', popupTime);
+          showMsgForDuration('Error Filling Form...', 'err');
         }
       });
     } catch (e) {
-      showMsgForDuration('Error Filling Form...', 'err', popupTime);
+      showMsgForDuration('Error Filling Form...', 'err');
     }
   };
 
@@ -1253,11 +1481,13 @@ function App() {
     console.log("Updated messageQueue:", messageQueue);
   }, [messageQueue]);
 
-  const showMsgForDuration = (msg, type, duration, replaceJob = null) => {
-    console.log('adding ' + msg + 'to the queue...')
+  const showMsgForDuration = (msg, type, duration = popupTime, replaceJob = null) => {
+    console.log('adding [' + msg + '] to the queue...')
     const id = Date.now(); // Unique ID for each message
 
-    setMessageQueue(prevQueue => [...prevQueue, { id, msg, type, replaceJob }]);
+    let msgJob = buildFormJob();
+    const msgPrinter = selectedPrinter
+    setMessageQueue(prevQueue => [...prevQueue, { id, msg, type, replaceJob, msgPrinter, msgJob }]);
 
     // Set a timeout to remove the message after its duration
     setTimeout(() => {
@@ -1268,8 +1498,11 @@ function App() {
   };
 
   const handlePrinterClick = (index) => {
+    // reset personal filament and send email to default values when the printer selection changes
     setPersonalFilament(false);
-    setMenuOpen(false)
+    setSendEmail(true);
+
+    setMenuOpen(false);
     if (!index) {
       selectPrinter(null);
     }
@@ -1302,6 +1535,9 @@ function App() {
 
     //clear the form data table
     setFormData(null);
+
+    // make it not a supervisor print
+    setSupervisorPrint(false);
   }
 
 
@@ -1324,12 +1560,21 @@ function App() {
   };
 
   const handleUpload = async (e) => {
+    let files = Array.from(e.target.files)
+
+    // if(files.some((file)=>{
+    //   return !file.name.endsWith('.stl');
+    // })) {
+    //   showMsgForDuration('Cannot upload files: Only .stl files allowed', 'err');
+    //   return;
+    // }
+
     // immediately clear the files state and update the placeholder
     setfiles('');
     setFilesPlaceholder('Uploading Parts to Google Drive...');
 
     //update the part names
-    const filesList = Array.from(e.target.files).map(file => {
+    const filesList = files.map(file => {
       return file.name.substring(0, file.name.lastIndexOf('.')) || file;
     });
     const fileNames = filesList.join(', ');
@@ -1376,6 +1621,7 @@ function App() {
 
   const handleemail = (e) => {
     const email = e.target.value;
+
     setemail(email);
     console.log("set email to " + email);
   };
@@ -1438,7 +1684,15 @@ function App() {
             {editingJob.jobID !== job.jobID ? 'edit' : 'save'}
           </button></td>
         }
-        <td dangerouslySetInnerHTML={{ __html: applyHighlight(formatDate(job.timeStarted, true), queue, 40) }} />
+        {(!queue) &&
+          <td>
+            <button onClick={() => { autofillFields(job); showMsgForDuration('Autofill Successful', 'msg'); }} className='history-btn'>
+              Autofill
+            </button>
+          </td>}
+
+        <td dangerouslySetInnerHTML={{ __html: applyHighlight(formatDate(job.timeStarted, true), queue, 400) }} />
+
 
         {
           (isAdmin && (editingJob.jobID === job.jobID)) ?
@@ -1463,20 +1717,22 @@ function App() {
               </td>}
               <td><input type="text" className="history-edit" value={editingJob.usage_g} onChange={(e) => handleJobEdit(e, "usage_g")}></input></td>
               <td><input type="text" className="history-edit" value={editingJob.notes} onChange={(e) => handleJobEdit(e, "notes")}></input></td>
+              <td>{job.files.split(',').map((link, index) => { return (<button style={{ cursor: 'pointer' }} onClick={() => window.location.href = getDirectDownloadLink(link.trim())}>{index + 1}</button>) })}</td>
               <td><input type="text" className="history-edit" value={editingJob.files} onChange={(e) => handleJobEdit(e, "files")}></input></td>
             </>
             :
             <>
-              {!queue && <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.status, queue, 40) }} />}
-              {isComprehensive && <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.printerName, queue, 40) }} />}
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.partNames, queue, 40) }} />
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.name, queue, 20) }} />
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.email, queue, 30) }} />
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.supervisorName, queue, 20) }} />
-              {!queue && <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.personalFilament ? 'personal' : 'club', queue, 20) }} />}
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.usage_g.toString(), queue, 20) }} />
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.notes, queue, 128) }} />
-              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.files, queue, 256) }} />
+              {!queue && <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.status, queue, 400) }} />}
+              {isComprehensive && <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.printerName, queue, 400) }} />}
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.partNames, queue, 400) }} />
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.name, queue, 200) }} />
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.email, queue, 300) }} />
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.supervisorName, queue, 200) }} />
+              {!queue && <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.personalFilament ? 'personal' : 'club', queue, 200) }} />}
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.usage_g.toString(), queue, 200) }} />
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.notes, queue, 600) }} />
+              <td>{job.files.split(',').map((link, index) => { return (<button style={{ cursor: 'pointer' }} onClick={() => window.location.href = getDirectDownloadLink(link.trim())}>{index + 1}</button>) })}</td>
+              <td dangerouslySetInnerHTML={{ __html: applyHighlight(job.files, queue, 2560) }} />
             </>
         }
       </>
@@ -1484,9 +1740,10 @@ function App() {
   }
 
   // Highlight the search in the job's fields by wrapping it with <b>
-  const applyHighlight = (text, queue, length = 40) => {
-    if (!text || !historySearch || queue) return truncateString(text, length);
-    const truncatedText = truncateString(text, length);
+  const applyHighlight = (text, queue, pixelWidth = 400) => {
+    const truncatedText = truncateStringWidth(text, pixelWidth);
+
+    if (!text || !historySearch || queue) return truncatedText;
 
     const escapedSearch = historySearch.replace(/[-\\^$*+?.()|[\]{}]/g, '\\$&');
     const regex = new RegExp(escapedSearch, 'i');
@@ -1501,9 +1758,8 @@ function App() {
     setFormData, pullFormData, formData, truncateString, handlename, name, supervisorPrint, email, handleemail,
     handlesupervisor, partNames, handlePartNames, handleUpload, handleFilamentUsage, selectedPrinter,
     filamentUsage, files, notes, handlenotes, fillFormData, supervisor, handlefiles, formDataLoading,
-    filesPlaceholder
+    filesPlaceholder, memberList, personalFilament
   }
-
 
   return (
     <div className="App">
@@ -1531,26 +1787,19 @@ function App() {
           </div>}
           {(loading === 'error') && <div>
             <h1><b>Server Connection Failed</b></h1>
+            <h3 style={{ 'fontSize': '22px' }}>Please consider restarting the PC if the issue persists.</h3><br />
             <img src={xIcon} alt="error" style={{ width: "60px", height: "60px", margin: "auto", marginBottom: "15px", marginTop: "10px" }} />
-
           </div>}
           {loading === 'done' &&
             <div>
               {/* Print of the day stl previews*/}
-              <h1 className={'menu-title ' + ((!selectedPrinter && !menuOpen) ? '' : 'hidden')}><b>🔥 Trending Print</b></h1>
-              {(potdStatus === 'done') && <div>
-                <h2 className={(!selectedPrinter && !menuOpen) ? '' : 'hidden'}><b>{dailyPrint.pageName} - &nbsp;
-                  <a target="_blank" rel="noreferrer" href={dailyPrint?.pageLink}>Source</a></b></h2>
-                <div className={'stl-previews ' + ((!selectedPrinter && !menuOpen) ? '' : 'hidden')}>
-                  {dailyPrint?.parts?.map((file, index) => {
-                    return (
-                      <div className={'stl-preview '} key={index}><StlPreview googleDriveLink={file.file} name={file.name} getDirectDownloadLink={getDirectDownloadLink} serverURL={serverURL}></StlPreview></div>
-                    )
-                  })
-                  }
-                </div>
-              </div>
+              <h1 className={'menu-title ' + ((!selectedPrinter && !menuOpen) ? '' : 'hidden')}><b>🔥 Trending Prints</b></h1>
+              {(potdStatus === 'done') && <TrendingPrints
+                dailyPrint={dailyPrint} selectedPrinter={selectedPrinter} menuOpen={menuOpen} truncateString={truncateString}>
+              </TrendingPrints>
               }
+
+
               {(potdStatus === 'loading') && <div>
                 <img src={loadingGif} alt="loading" style={{ width: "60px", height: "60px", margin: "auto", marginBottom: "15px", marginTop: "10px" }} />
               </div>}
@@ -1662,41 +1911,50 @@ function App() {
 
               <div style={{ height: '80px' }} />
 
-              {/* Comprehensive print history here */}
-              <PrintHistoryTable historyList={historyList} historySearch={historySearch} handleHistorySearch={handleHistorySearch} setHistorySearch={setHistorySearch} 
-              createHistoryRow={createHistoryRow} selectedPrinter={selectedPrinter} isAdmin={isAdmin} formatDate={formatDate}></PrintHistoryTable>
+              {/* Comprehensive print history */}
+              <PrintHistoryTable historyList={historyList} historySearch={historySearch} handleHistorySearch={handleHistorySearch} setHistorySearch={setHistorySearch}
+                createHistoryRow={createHistoryRow} selectedPrinter={selectedPrinter} isAdmin={isAdmin} formatDate={formatDate}></PrintHistoryTable>
 
             </div>}
           </div>}
 
           {selectedPrinter && !menuOpen && <div>
             <div style={{ height: "35px" }}></div>
-            <div className='stat-msg' style={{ backgroundColor: getStatMsgColor() }}>
-              {getStatMsg()}
-              <hr style={{ borderTop: '1px solid black', width: '100%' }} />
-              {selectedPrinter.filamentType !== 'Resin' ? (isAdmin ? <div> {"Use "}
-                <select id="filamentType" value={selectedPrinter.filamentType} onChange={handleFilamentType}>
-                  <option value="PLA">PLA</option>
-                  <option value="PETG">PETG</option>
-                  <option value="TPU">TPU</option>
-                </select>
-                {" filament on this printer."}</div>
-                :
-                "Use " + selectedPrinter.filamentType + " filament on this printer.")
-                :
-                "This is a Resin (SLA) Printer."
-              }
+            <div className='stat-msg' style={{ backgroundColor: getStatMsgColor(), display: 'flex', flexWrap: 'nowrap', }}>
+              <img src={`/images/printers/${selectedPrinter.model}.jpg`} style={{
+                width: '110px', height: '110px', flex: '0 0 auto', border: '1px solid black', borderRadius: '5px', objectFit: 'contain', objectPosition: 'center', backgroundColor: '#fff'
+              }} onError={(e) => {
+                e.currentTarget.onerror = null;
+                e.currentTarget.src = '/images/printers/missing.jpg';
+              }}></img>
+              <div style={{ flex: '1 1 auto', minWidth: 0, paddingLeft: '10px' }}>
+                {getStatMsg()}
+                <hr style={{ borderTop: '1px solid black', width: '100%' }} />
+                {(isAdmin ? <div> {"Use "}
+                  <select id="filamentType" value={selectedPrinter.filamentType} onChange={handleFilamentType}>
+                    <option value="PLA">PLA</option>
+                    <option value="PETG">PETG</option>
+                    <option value="TPU">TPU</option>
+                    <option value="Resin">Resin</option>
+                  </select>
+                  {" on this printer."}</div>
+                  :
+                  "Use " + selectedPrinter.filamentType + " on this printer.")
+                }
+              </div>
             </div>
             <br />
             {
-              (curJob && (selectedPrinter.status === 'busy' || selectedPrinter.status === 'admin-busy')) &&
+              (curJob && (selectedPrinter.status?.slice(-4) === 'busy')) &&
               <div>
-                <div className='stat-msg info' style={{ backgroundColor: 'white', textAlign: 'left' }}>
+                <div className='stat-msg info' style={{ backgroundColor: 'white', textAlign: 'left', flexDirection: 'column' }}>
                   {
                     curJob.name === curJob.supervisorName ? <>
                       <span>&nbsp;<b>Supervisor Name:</b> {curJob.name}</span>
                       <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
-                      <span>&nbsp;<b>Files:</b> {curJob.files.replace(/,/g, ',\n')}</span>
+                      <span>&nbsp;<b>Started:</b> {formatDate(curJob.timeStarted, true)}</span>
+                      <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
+                      <span>&nbsp;<b>Filament Used:</b> {curJob.usage_g}g</span>
                       <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
                       <span>&nbsp;<b>Notes:</b> {curJob.notes}</span>
                     </> : <>
@@ -1706,7 +1964,9 @@ function App() {
                       <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
                       <span>&nbsp;<b>Supervisor:</b> {curJob.supervisorName}</span>
                       <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
-                      <span>&nbsp;<b>Files:</b> {curJob.files.replace(/,/g, ',\n')}</span>
+                      <span>&nbsp;<b>Started:</b> {formatDate(curJob.timeStarted, true)}</span>
+                      <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
+                      <span>&nbsp;<b>Filament Used:</b> {curJob.usage_g}g</span>
                       <hr style={{ borderTop: '1px solid lightgray', width: '100%', marginTop: '5px' }} />
                       <span>&nbsp;<b>Notes:</b> {curJob.notes}</span>
                     </>
@@ -1725,43 +1985,85 @@ function App() {
 
             {/* Printer status pages: busy, available, admin, admin-busy, broken, and testing */}
 
-            {((selectedPrinter.status === "busy") || ((selectedPrinter.status === "admin-busy"))) && <div>
-              <button onClick={() => { handlePrintDoneClick("completed", null) }} style={{ backgroundColor: "rgba(100, 246, 100,0.8)" }} className='printer-btn'>Print Done</button>
+            {((selectedPrinter.status?.slice(-4) === "busy")) && <div>
+              <button onClick={() => { handlePrintDoneClick("completed", null) }} style={{ backgroundColor: "rgba(100, 246, 100,0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`images/check-circle.svg`}></img>Print Done</button>
+              {((selectedPrinter.status === "busy") || ((selectedPrinter.status?.slice(-4) === "busy") && isAdmin)) && <>
+                <button onClick={() => { handlePrintDoneClick("failed", null) }} style={{ backgroundColor: "rgba(246, 155, 97,0.8)" }} className='printer-btn'>
+                  <img className='status-icon' src={`${statusIconFolder}/failed.svg`}></img>Print Failed</button>
+                <button onClick={() => { cancelPrint() }} style={{ backgroundColor: 'rgb(159, 188, 254, 0.8)' }} className='printer-btn'>
+                  <img className='status-icon' src={`images/cancel.svg`}></img>Cancel Print</button>
+                <select className="printer-btn select" value={moveSelect} onChange={(e) => {
+                  const printer = e.target.value;
+                  if (!printer) return;
+                  movePrint(printer);
+                  setMoveSelect("");
+                }}>
+                  <option value="" disabled hidden>Move Print</option>
+                  {printerList.map((printer) => {
+                    if ((((printer.filamentType === 'Resin') && (selectedPrinter.filamentType === 'Resin')) || // both printers are resin
+                      ((printer.filamentType !== 'Resin') && (selectedPrinter.filamentType !== 'Resin')))   // OR both printers aren't resin 
+                      && ((printer.status == 'available') || (isAdmin && printer.status == 'admin'))) {     // AND the printer must be available
+                      return <>
+                        <option value={printer.printerName}>{printer.printerName}</option>
+                      </>
+                    }
+                  })}
+                </select>
+              </>}
               {isAdmin && <>
-                <button onClick={() => { handlePrintDoneClick("failed", null) }} style={{ backgroundColor: "rgba(246, 155, 97,0.8)" }} className='printer-btn'>Print Failed</button>
-                <button onClick={() => { cancelPrint() }} style={{ backgroundColor: 'rgba(118, 152, 255,0.8)' }} className='printer-btn'>Cancel Print</button>
                 <div>
-                  <button onClick={() => { printerChangeWhileBusy("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>Printer Broke</button>
-                  <button onClick={() => { printerChangeWhileBusy("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>Testing Printer</button>
-                  {selectedPrinter.status === 'busy' && <button onClick={() => { printerChangeWhileBusy("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>Admin Printer</button>}
+                  <button onClick={() => { printerChangeWhileBusy("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/broken.svg`}></img>Printer Broke</button>
+                  <button onClick={() => { printerChangeWhileBusy("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/testing.svg`}></img>Testing Printer</button>
+                  {selectedPrinter.status === 'busy' && <button onClick={() => { printerChangeWhileBusy("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/admin.svg`}></img>Admin Printer</button>}
                 </div>
               </>}
               <br />
 
+
+
               {/* If the printer is a resin printer, then also include the option to queue up a new print */}
               {
-                selectedPrinter.filamentType === 'Resin' && <>
-                  <br /><br />
-                  <PrintForm printFormArgs={printFormArgs}></PrintForm>
-                  <br />
+                // selectedPrinter.filamentType === 'Resin' && <>
+                //   {(((selectedPrinter.status?.slice(-4) === "busy"))) && <>
+                //     <StlPreviewSection
+                //       showSTLPreviews={showSTLPreviews}
+                //       curJob={curJob}
+                //       getDirectDownloadLink={getDirectDownloadLink}
+                //       truncateString={truncateString}
+                //       serverURL={serverURL}
+                //     />
+                //   </>}
+                //   <br /><br />
+                //   <PrintForm printFormArgs={printFormArgs}></PrintForm>
+                //   <br />
 
-                  {/* Checkbox to toggle supervisor print */}
-                  <FormCheckbox activeCheckVal={supervisorPrint} handleChangeFunc={handleSupervisorPrintChange} text={"Supervisor Print"}></FormCheckbox>
+                //   {/* Checkbox to toggle supervisor print */}
+                //   <FormCheckbox activeCheckVal={supervisorPrint} handleChangeFunc={handleSupervisorPrintChange} text={"Supervisor Print"}></FormCheckbox>
 
-                  {/* Checkbox to toggle personal filament */}
+                //   {/* Checkbox to toggle personal filament */}
 
-                  {(selectedPrinter.filamentType !== 'Resin') &&
-                    <FormCheckbox activeCheckVal={personalFilament} handleChangeFunc={handlePersonalFilamentChange} text={"Personal Filament"}></FormCheckbox>
-                  }
+                //   {(selectedPrinter.filamentType !== 'Resin') &&
+                //     <FormCheckbox activeCheckVal={personalFilament} handleChangeFunc={handlePersonalFilamentChange} text={"Personal Filament"}></FormCheckbox>
+                //   }
 
-                  <br />
-                  <button onClick={() => { handleStartPrintClick(selectedPrinter.filamentType === 'Resin') }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>{selectedPrinter.filamentType === 'Resin' ? 'Queue Print' : 'Start Print'}</button>
-                  <button onClick={() => { clearFields() }} style={{ backgroundColor: 'rgba(118, 152, 255,0.8)' }} className='printer-btn'>Clear Form</button>
-                </>
+                //   <br />
+                //   {/* <button onClick={() => { handleStartPrintClick(selectedPrinter.filamentType === 'Resin') }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                //     <img className='status-icon' src={selectedPrinter.filamentType !== 'Resin' ? `${statusIconFolder}/start.svg` : `${statusIconFolder}/queue.svg`}></img>{selectedPrinter.filamentType === 'Resin' ? 'Queue Print' : 'Start Print'}</button> */}
+                //   <button onClick={() => { handleStartPrintClick(false) }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                //     <img className='status-icon' src={`${statusIconFolder}/start.svg`}></img>{'Start Print'}</button>
+                //   <button onClick={() => { clearFields() }} style={{ backgroundColor: 'rgb(159, 188, 254, 0.8)' }} className='printer-btn'>
+                //     <img className='status-icon' src={`${statusIconFolder}/clear.svg`}></img>Clear Form</button>
+                // </>
               }
+
+
             </div>}
 
-            {((selectedPrinter.status === "busy") || (selectedPrinter.status === "admin-busy")) && <>
+            {(((selectedPrinter.status?.slice(-4) === "busy")) && selectedPrinter.filamentType !== 'Resin') && <>
               <StlPreviewSection
                 showSTLPreviews={showSTLPreviews}
                 curJob={curJob}
@@ -1790,12 +2092,19 @@ function App() {
                 }
 
                 <br />
-                <button onClick={() => { handleStartPrintClick(selectedPrinter.filamentType === 'Resin') }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>{selectedPrinter.filamentType === 'Resin' ? 'Queue Print' : 'Start Print'}</button>
-                <button onClick={() => { clearFields() }} style={{ backgroundColor: 'rgba(118, 152, 255,0.8)' }} className='printer-btn'>Clear Form</button>
+                 {/* <button onClick={() => { handleStartPrintClick(selectedPrinter.filamentType === 'Resin') }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={selectedPrinter.filamentType !== 'Resin' ? `${statusIconFolder}/start.svg` : `${statusIconFolder}/queue.svg`}></img>{selectedPrinter.filamentType === 'Resin' ? 'Queue Print' : 'Start Print'}</button> */}
+                  <button onClick={() => { handleStartPrintClick(false) }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/start.svg`}></img>{'Start Print'}</button>
+                <button onClick={() => { clearFields() }} style={{ backgroundColor: 'rgb(159, 188, 254, 0.8)' }} className='printer-btn'>
+                  <img className='status-icon' src={`${statusIconFolder}/clear.svg`}></img>Clear Form</button>
                 {isAdmin && <div style={{ display: 'block' }}>
-                  <button onClick={() => { handlePrinterStatusChange("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>Printer Broke</button>
-                  <button onClick={() => { handlePrinterStatusChange("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>Testing Printer</button>
-                  <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>Admin Printer</button>
+                  <button onClick={() => { handlePrinterStatusChange("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/broken.svg`}></img>Printer Broke</button>
+                  <button onClick={() => { handlePrinterStatusChange("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/testing.svg`}></img>Testing Printer</button>
+                  <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/admin.svg`}></img>Admin Printer</button>
                 </div>}
                 <br />
 
@@ -1809,12 +2118,14 @@ function App() {
               </div>
             </div>}
 
-            {selectedPrinter && (selectedPrinter.status === "admin") && isAdmin && <div>
+            {selectedPrinter && (selectedPrinter.status === "admin" || selectedPrinter.status === "testing") && isAdmin && <div>
               <PrintForm printFormArgs={printFormArgs}></PrintForm>
               <br />
 
               {/* Checkbox to toggle supervisor print */}
               <FormCheckbox activeCheckVal={supervisorPrint} handleChangeFunc={handleSupervisorPrintChange} text={"Supervisor Print"}></FormCheckbox>
+
+              <FormCheckbox activeCheckVal={showSTLPreviews} handleChangeFunc={toggleSTLPreviews} text={"STL Previews"}></FormCheckbox>
 
               {/* Checkbox to toggle personal filament */}
               {(selectedPrinter.filamentType !== 'Resin') &&
@@ -1822,12 +2133,29 @@ function App() {
               }
 
               <br />
-              <button onClick={() => { handleStartPrintClick(selectedPrinter.filamentType === 'Resin') }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>{selectedPrinter.filamentType === 'Resin' ? 'Queue Print' : 'Start Print'}</button>
-              <button onClick={() => { clearFields() }} style={{ backgroundColor: 'rgba(118, 152, 255,0.8)' }} className='printer-btn'>Clear Form</button>
+               {/* <button onClick={() => { handleStartPrintClick(selectedPrinter.filamentType === 'Resin') }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={selectedPrinter.filamentType !== 'Resin' ? `${statusIconFolder}/start.svg` : `${statusIconFolder}/queue.svg`}></img>{selectedPrinter.filamentType === 'Resin' ? 'Queue Print' : 'Start Print'}</button> */}
+              <button onClick={() => { handleStartPrintClick(false) }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/start.svg`}></img>{'Start Print'}</button>
+              <button onClick={() => { clearFields() }} style={{ backgroundColor: 'rgb(159, 188, 254, 0.8)' }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/clear.svg`}></img>Clear Form</button>
+
               {isAdmin && <div style={{ display: 'block' }}>
-                <button onClick={() => { handlePrinterStatusChange("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>Printer Broke</button>
-                <button onClick={() => { handlePrinterStatusChange("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>Testing Printer</button>
-                <button onClick={() => { handlePrinterStatusChange("available") }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>Printer Available</button>
+                <button onClick={() => { handlePrinterStatusChange("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>
+                  <img className='status-icon' src={`${statusIconFolder}/broken.svg`}></img>Printer Broke</button>
+
+                {(selectedPrinter.status === "admin") && <>
+                  <button onClick={() => { handlePrinterStatusChange("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/testing.svg`}></img>Testing Printer</button>
+                </>
+                }
+                {(selectedPrinter.status === "testing") && <>
+                  <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>
+                    <img className='status-icon' src={`${statusIconFolder}/admin.svg`}></img>Admin Printer</button>
+                </>
+                }
+                <button onClick={() => { handlePrinterStatusChange("available") }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                  <img className='status-icon' src={`${statusIconFolder}/available.svg`}></img>Printer Available</button>
               </div>}
 
               <br />
@@ -1842,20 +2170,28 @@ function App() {
             </div>}
 
             {selectedPrinter && (selectedPrinter.status === "broken") && isAdmin && <div>
-              <button onClick={() => { handlePrinterStatusChange("available") }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>Printer Available</button>
-              <button onClick={() => { handlePrinterStatusChange("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>Testing Printer</button>
-              <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>Admin Printer</button>
+              <button onClick={() => { handlePrinterStatusChange("available") }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/available.svg`}></img>Printer Available</button>
+              <button onClick={() => { handlePrinterStatusChange("testing") }} style={{ backgroundColor: "rgba(255, 255, 255,0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/testing.svg`}></img>Testing Printer</button>
+              <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/admin.svg`}></img>Admin Printer</button>
             </div>}
 
-            {selectedPrinter && (selectedPrinter.status === "testing") && isAdmin && <div>
-              <button onClick={() => { handlePrinterStatusChange("available") }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>Printer Available</button>
-              <button onClick={() => { handlePrinterStatusChange("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>Printer Broke</button>
-              <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>Admin Printer</button>
-            </div>}
+            {/* {selectedPrinter && (selectedPrinter.status === "testing") && isAdmin && <div>
+              <button onClick={() => { handlePrinterStatusChange("available") }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/available.svg`}></img>Printer Available</button>
+              <button onClick={() => { handlePrinterStatusChange("broken") }} style={{ backgroundColor: "rgba(246, 97, 97,0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/broken.svg`}></img>Printer Broke</button>
+              <button onClick={() => { handlePrinterStatusChange("admin") }} style={{ backgroundColor: "rgba(100, 180, 100, 0.8)" }} className='printer-btn'>
+                <img className='status-icon' src={`${statusIconFolder}/admin.svg`}></img>Admin Printer</button>
+            </div>} */}
 
             {/* End printer status pages */}
 
             {selectedPrinter && isAdmin && (printerNotes === null) && <div>
+              <div style={{ height: '20px' }}></div>
+
               <div className='notes-msg'>
                 <strong>-- Printer Status Notes --</strong><br />
                 {
@@ -1881,11 +2217,11 @@ function App() {
             </div>}
 
 
-            {
+            {/* {
               selectedPrinter.filamentType === 'Resin' && <div>
                 <div style={{ height: "50px" }}></div>
 
-                <div className="print-history" style={{ marginTop: '20px' }}>Resin Printing Queue [{historyList.filter(item => item.status === 'queued').length}/5]</div>
+                <div className="print-history" style={{ marginTop: '20px' }}>Resin Printing Queue [{historyList.filter(item => item.status === 'queued').length}/3]</div>
 
                 <div className='wrapper-wrapper'>
                   <table className='history-wrapper'>
@@ -1893,6 +2229,7 @@ function App() {
                       <tr className='queue-top'>
                         {isAdmin && <th>Delete</th>}
                         {isAdmin && <th>Edit</th>}
+
                         <th>Time Queued</th>
                         <th>Parts</th>
                         <th>Name</th>
@@ -1900,6 +2237,7 @@ function App() {
                         <th>Supervisor</th>
                         <th>Usage (ml)</th>
                         <th>Notes</th>
+                        <th>Downloads</th>
                         <th>Files</th>
                       </tr>
                     </thead>
@@ -1920,30 +2258,29 @@ function App() {
                   <button onClick={() => { releaseFromQueue() }} style={{ backgroundColor: "rgba(30, 203, 96,0.8)" }} className='printer-btn'>{'Release From Queue'}</button>}
 
               </div>
-            }
+            } */}
 
             <div style={{ height: "100px" }}></div>
 
             {/* print history table */}
-            <PrintHistoryTable historyList={historyList} historySearch={historySearch} handleHistorySearch={handleHistorySearch} setHistorySearch={setHistorySearch} 
+            <PrintHistoryTable historyList={historyList} historySearch={historySearch} handleHistorySearch={handleHistorySearch} setHistorySearch={setHistorySearch}
               createHistoryRow={createHistoryRow} selectedPrinter={selectedPrinter} isAdmin={isAdmin} formatDate={formatDate}></PrintHistoryTable>
 
 
             <div className='printer-header-wrapper' style={{ width: `calc((100% - ${sidebarOpen ? sidebarWidth : 0}px))` }}>
               <div className='printer-header' style={{
-                //left: `calc(${sidebarWidth}px + (100% - ${sidebarWidth}px) / 4)`
-                width: `calc((100% - ${sidebarOpen ? sidebarWidth : 0}px)/2)`,
+                display: 'inline-block',
+                whiteSpace: 'nowrap',
                 backgroundColor: `${getStatusColor(selectedPrinter.status)}`,
-                minWidth: 'fit-content',
+                margin: 'auto',
+                paddingLeft: '10px',
+                paddingRight: '20px',
               }}>
+                <img className='status-icon' style={{ height: '25px', width: '25px', paddingRight: '8px' }} src={mapStatusToIcon(selectedPrinter.status)}></img>
                 {selectedPrinter.printerName} - {selectedPrinter.model}
               </div>
-
             </div>
-
           </div>}
-
-
         </div>
 
         {menuOpen ? (
@@ -1953,7 +2290,9 @@ function App() {
                 isAdmin={isAdmin} checkPswd={checkPswd} feedbackSubject={feedbackSubject} feedbackText={feedbackText}
                 handleFeedbackSubjectChange={handleFeedbackSubjectChange} handleFeedbackTextChange={handleFeedbackTextChange}
                 handleFeedbackClick={handleFeedbackClick} handleIsAdminChange={handleIsAdminChange}
-                serverURL={serverURL} setServerURL={setServerURL} />
+                serverURL={serverURL} setServerURL={setServerURL} menuOpen={menuOpen} truncateStringWidth={truncateStringWidth}
+                memberList={memberList} setMemberList={setMemberList} formatDate={formatDate} truncateString={truncateString}
+                showMsgForDuration={showMsgForDuration} />
             }
           </div>
         ) :
@@ -1963,7 +2302,9 @@ function App() {
                 isAdmin={isAdmin} checkPswd={checkPswd} feedbackSubject={feedbackSubject} feedbackText={feedbackText}
                 handleFeedbackSubjectChange={handleFeedbackSubjectChange} handleFeedbackTextChange={handleFeedbackTextChange}
                 handleFeedbackClick={handleFeedbackClick} handleIsAdminChange={handleIsAdminChange}
-                serverURL={serverURL} setServerURL={setServerURL} />
+                serverURL={serverURL} setServerURL={setServerURL} menuOpen={menuOpen} truncateStringWidth={truncateStringWidth}
+                memberList={memberList} setMemberList={setMemberList} formatDate={formatDate} truncateString={truncateString}
+                showMsgForDuration={showMsgForDuration} />
             </div>
           )}
 
@@ -1971,11 +2312,12 @@ function App() {
           <h1 style={{ color: 'rgb(0,0,0)' }}>{isAdmin ? '3DPC - Print Manager - Admin' : '3DPC - Print Manager'}</h1>
         </div>
         {
-          messageQueue.map(({ id, msg, type, replaceJob }, index) => {
+          messageQueue.map((notification, index) => {
+            const { id, msg, type, replaceJob, msgPrinter, msgJob } = notification
             return (
-              <div style={{ top: `${10 + (index * 60) + (getWarningsBeforeIndex(index) * 85)}px`, whiteSpace: 'pre-line', zIndex: 11 }} key={id} className={`${type}-msg`}>{msg}<ExitIcon className="msg-exit" onClick={() => handleMsgExit(id)}></ExitIcon>
+              <div style={{ top: `${10 + (index * 60) + (getWarningsBeforeIndex(index) * 85)}px`, whiteSpace: 'pre-line', zIndex: 11 }} key={id} className={`${type}-msg`}>{msg}<img src={exitIcon} className="msg-exit" onClick={() => handleMsgExit(id)}></img>
                 {(type === 'warn') && <div className="warning-content">
-                  <div onClick={() => { handleWarningClick(id, replaceJob) }} style={{ backgroundColor: "rgb(118, 152, 255)" }} className='printer-btn'>Continue</div>
+                  <div onClick={() => { handleWarningClick(notification) }} style={{ backgroundColor: "#afc6fa" }} className='printer-btn'>Continue</div>
                 </div>}
               </div>
             )
@@ -1994,7 +2336,6 @@ function App() {
 
 
 function StlPreviewSection({ showSTLPreviews, curJob, getDirectDownloadLink, truncateString, serverURL }) {
-  console.log('---- curJob:', curJob)
   return (
     <>
       {showSTLPreviews ? (
@@ -2004,7 +2345,7 @@ function StlPreviewSection({ showSTLPreviews, curJob, getDirectDownloadLink, tru
               let trimmedLink = link.trim();
 
               if (trimmedLink.startsWith('https://')) {
-                let partname = curJob.partNames?.split(',')[index]
+                let partname = String(curJob.partNames)?.split(',')[index]
 
                 return (
                   <div className="stl-preview" key={index}>
@@ -2025,7 +2366,7 @@ function StlPreviewSection({ showSTLPreviews, curJob, getDirectDownloadLink, tru
 
               return (
                 <button className="printer-btn" key={index} onClick={() => window.location.href = getDirectDownloadLink(link.trim())}>
-                  {partname ? truncateString(partname.trim(), 24) : 'Download File ' + index}
+                  <img className='status-icon ' src={`images/download.svg`}></img> {partname ? truncateString(partname.trim(), 24) : 'File ' + index}
                 </button>
               );
             } else {
@@ -2056,6 +2397,7 @@ function PrintHistoryTable({ historyList, historySearch, handleHistorySearch, se
             <tr>
               {isAdmin && <th>Delete</th>}
               {isAdmin && <th>Edit</th>}
+              {<th>Autofill</th>}
               <th>Time Started</th>
               <th>Status</th>
               {isComprehensive && <th>Printer</th>}
@@ -2066,6 +2408,7 @@ function PrintHistoryTable({ historyList, historySearch, handleHistorySearch, se
               <th>Filament</th>
               <th>Used {selectedPrinter?.filamentType === 'Resin' ? '(ml)' : '(g)'}</th>
               <th>Notes</th>
+              <th>Downloads</th>
               <th>Files</th>
             </tr>
           </thead>
