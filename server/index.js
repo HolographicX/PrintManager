@@ -88,7 +88,7 @@ async function getGraphClient() {
 }
 
 
-const pool = isLocal ? mysql.createPool({ // for local development
+const pool = process.env.IS_LOCAL ? mysql.createPool({ // for local development
     host: process.env.MYSQL_HOST,
     user: process.env.MYSQL_USER,
     password: process.env.MYSQL_PASSWORD,
